@@ -1,5 +1,7 @@
 # VPD Calculator
 
+[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://vpd-or-not-vpd.streamlit.app/)
+
 An interactive vapour pressure deficit (VPD) calculator for controlled-environment plant research
 (e.g. *Fragaria vesca* phytotron experiments), built with Python, Streamlit and Plotly.
 
@@ -29,8 +31,7 @@ See [vpd_calculator/README.md](vpd_calculator/README.md) for details, project la
 3. Deploy. `packages.txt` (repo root) installs Chromium for server-side PNG export; if that export is
    unavailable, the app falls back to the camera icon in the chart toolbar.
 
-Once deployed, add a badge here:
-`[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](YOUR-APP-URL)`
+Live app: https://vpd-or-not-vpd.streamlit.app/
 
 ## Method and sources
 
