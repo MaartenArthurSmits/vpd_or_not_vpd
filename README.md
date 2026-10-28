@@ -10,7 +10,9 @@ An interactive vapour pressure deficit (VPD) calculator for controlled-environme
 - Day/night treatment comparison (Control/Warming temperature presets)
 - CSV and PNG exports
 
-## Quick start
+**Use it online:** https://vpd-or-not-vpd.streamlit.app/
+
+## Run locally
 
 ```powershell
 cd vpd_calculator
@@ -23,15 +25,6 @@ streamlit run app.py
 Run the tests with `python -m pytest` from `vpd_calculator/`.
 
 See [vpd_calculator/README.md](vpd_calculator/README.md) for details, project layout and notes.
-
-## Deploy on Streamlit Community Cloud
-
-1. Go to https://share.streamlit.io and choose **Create app** from this GitHub repository.
-2. Branch `main`, main file path `vpd_calculator/app.py`.
-3. Deploy. `packages.txt` (repo root) installs Chromium for server-side PNG export; if that export is
-   unavailable, the app falls back to the camera icon in the chart toolbar.
-
-Live app: https://vpd-or-not-vpd.streamlit.app/
 
 ## Method and sources
 
