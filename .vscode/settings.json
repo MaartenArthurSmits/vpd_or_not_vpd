@@ -1,0 +1,3 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/vpd_calculator/.venv/Scripts/python.exe"
+}
