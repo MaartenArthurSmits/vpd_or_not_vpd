@@ -250,8 +250,11 @@ with tab_heat:
                                               template="plotly_white", width=1400, height=900)
                 st.session_state["png"] = (sig, export.to_image(format="png", scale=2))
             except Exception as e:  # kaleido/Chrome missing
-                st.error(f"PNG export failed ({e}). Install kaleido and Chrome "
-                         "(`plotly_get_chrome`), or use the camera icon in the chart toolbar.")
+                st.session_state.pop("png", None)
+                st.info("Server-side PNG export is not available in this environment "
+                        "(it needs Chrome/Chromium). Use the camera icon in the chart's toolbar "
+                        "to download a PNG instead, or run the app locally with Chrome installed.")
+                st.caption(f"Details: {type(e).__name__}")
         if "png" in st.session_state and st.session_state["png"][0] == sig:
             d2.download_button("Download PNG", st.session_state["png"][1], "vpd_heatmap.png", "image/png")
 

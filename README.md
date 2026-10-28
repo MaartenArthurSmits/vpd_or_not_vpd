@@ -22,6 +22,16 @@ Run the tests with `python -m pytest` from `vpd_calculator/`.
 
 See [vpd_calculator/README.md](vpd_calculator/README.md) for details, project layout and notes.
 
+## Deploy on Streamlit Community Cloud
+
+1. Go to https://share.streamlit.io and choose **Create app** from this GitHub repository.
+2. Branch `main`, main file path `vpd_calculator/app.py`.
+3. Deploy. `packages.txt` (repo root) installs Chromium for server-side PNG export; if that export is
+   unavailable, the app falls back to the camera icon in the chart toolbar.
+
+Once deployed, add a badge here:
+`[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](YOUR-APP-URL)`
+
 ## Method and sources
 
 Saturation vapour pressure uses FAO-56 Eq. 11 (Allen et al. 1998,
