@@ -49,6 +49,10 @@ python -m pytest
   camera icon in the chart toolbar.
 - Dark/light theme follows Streamlit's theme (Settings menu, top right).
 
+## License
+
+MIT, see [../LICENSE](../LICENSE).
+
 ## References
 
 - Allen, R.G., Pereira, L.S., Raes, D., Smith, M. (1998). *Crop evapotranspiration: guidelines for computing
