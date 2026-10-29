@@ -158,7 +158,10 @@ def leaf_inputs(prefix, t_air):
                       key=f"{prefix}_leaf_method", horizontal=True)
     if method == share.OFFSET_METHOD:
         off = offset_widget("Leaf temperature offset (°C)", f"{prefix}_offset", f"{prefix}_offset_preset")
-        st.caption(presets.LEAF_OFFSET_DISCLAIMER)
+        st.caption("Offsets are illustrative scenarios, not universal correction factors.")
+        with st.expander("About leaf-offset scenarios"):
+            st.markdown(presets.LEAF_OFFSET_DISCLAIMER)
+            st.caption("Source for the typical leaf-offset note: " + presets.SOURCE_APA)
         return off, None
     meas = linked("Measured leaf temperature (°C)", f"{prefix}_leaf_meas", -5.0, 50.0, 0.1)
     return meas - t_air, meas
@@ -203,11 +206,12 @@ with tab_calc:
             c1, c2 = st.columns(2)
             c1.metric("Air VPD", f"{r.vpd_air:.1f} kPa")
             c2.metric("Leaf VPD", f"{r.vpd_leaf:.1f} kPa")
-            c3, c4 = st.columns(2)
-            c3.metric("Saturation vapour pressure (air)", f"{r.es_air:.1f} kPa")
-            c4.metric("Actual vapour pressure", f"{r.ea:.1f} kPa")
-            st.caption(f"Leaf temperature: {r.t_leaf:.1f} °C (offset {r.t_leaf - t_air:+.1f} °C); "
-                       f"saturation vapour pressure at leaf: {r.es_leaf:.1f} kPa")
+            st.caption(f"Leaf temperature used: {r.t_leaf:.1f} °C (offset {r.t_leaf - t_air:+.1f} °C)")
+            with st.expander("Calculation details"):
+                d1, d2, d3 = st.columns(3)
+                d1.metric("Saturation vapour pressure (air)", f"{r.es_air:.1f} kPa")
+                d2.metric("Actual vapour pressure", f"{r.ea:.1f} kPa")
+                d3.metric("Saturation vapour pressure (leaf)", f"{r.es_leaf:.1f} kPa")
             for w in r.warnings:
                 st.warning(w)
             current_rh, cur_air, cur_leaf = rh_in, r.vpd_air, r.vpd_leaf
@@ -219,7 +223,7 @@ with tab_calc:
                 c1, c2 = st.columns(2)
                 c1.metric("Resulting air VPD", f"{res.vpd_air:.1f} kPa")
                 c2.metric("Resulting leaf VPD", f"{res.vpd_leaf:.1f} kPa")
-                st.caption(f"Leaf temperature: {res.t_leaf:.1f} °C (offset {res.t_leaf - t_air:+.1f} °C)")
+                st.caption(f"Leaf temperature used: {res.t_leaf:.1f} °C (offset {res.t_leaf - t_air:+.1f} °C)")
                 for w in res.warnings:
                     st.warning(w)
                 current_rh = min(max(res.rh, 0.0), 100.0)  # only tiny float-tolerance clipping
@@ -275,7 +279,10 @@ Methods & References for sources and limitations.
         stage = st.session_state["vpd_preset"]
         if stage in presets.GROWTH_STAGES:
             st.caption(f"**{stage}.** {presets.GROWTH_STAGES[stage]['note']}")
-        st.caption(presets.PRESET_DISCLAIMER + " Choose 'Custom' or edit the limits to set your own range.")
+        st.caption("Illustrative ranges, not scientifically validated species-specific optima.")
+        with st.expander("About the growth-stage presets"):
+            st.markdown(presets.PRESET_DISCLAIMER + " Choose 'Custom' or edit the limits to set your own range.")
+            st.caption("Source: " + presets.SOURCE_APA)
     ic1, ic2, ic3 = st.columns([1, 1, 1], gap="large")
     with ic1:
         lo = linked("Lower limit (kPa)", "vpd_lo", 0.0, 4.0, 0.1, num_max=10.0, after=main_range_edited)
