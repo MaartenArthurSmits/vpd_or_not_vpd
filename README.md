@@ -22,7 +22,8 @@ Three tabs: **Calculator**, **VPD Heatmap**, **Methods & References**.
 - **Heatmap:** interactive temperature x RH plot (air or leaf VPD) with contours, target range and selected point.
 - **Exports:** grid CSV, settings CSV, publication-quality heatmap PNG (300 dpi) and PDF rendered with Matplotlib
   (no browser needed), and a reproducible R script that recreates the calculation and the heatmap with ggplot2.
-- **Shareable links** restore calculator settings.
+- **Shareable links and setup file:** a link restores calculator, day/night and heatmap settings; the same settings can be
+  downloaded as `vpd-setup.json`.
 - **Scientific validation** against FAO-56 tables and an alternative published equation (Methods & References).
 
 Values are displayed with one decimal place; calculations, validation tables and CSV exports keep full precision.
@@ -64,13 +65,35 @@ Screenshots (desktop and mobile), downloaded files and console diagnostics go to
 `vpd_calculator/tests/artifacts/`. This folder is git-ignored; GitHub Actions uploads it as the
 `test-artifacts` artifact.
 
-See [docs/VALIDATION.md](docs/VALIDATION.md) for the scientific validation (published table values, calculated benchmarks, tolerances, limitations)
-and [vpd_calculator/README.md](vpd_calculator/README.md) for project layout.
+See [docs/VALIDATION.md](docs/VALIDATION.md) for the scientific validation (published table values, calculated
+benchmarks, tolerances, limitations).
+
+## Project layout
+
+Everything is in `vpd_calculator/`; run `streamlit run app.py` from that folder.
+
+| File | Purpose |
+|---|---|
+| `app.py` | Streamlit interface (three tabs) |
+| `vpd.py` | Calculations (FAO-56), grids, condensation limit |
+| `presets.py` | Illustrative growth-stage ranges and leaf-offset scenarios, with sources and disclaimers |
+| `plots.py` | Interactive Plotly figures |
+| `mpl_export.py` | Static PNG/PDF figures with Matplotlib (no browser) |
+| `rscript.py` | Reproducible R script export (calculation + ggplot2 heatmap) |
+| `share.py` | Shareable-link and setup-file (JSON) encoding |
+| `citation.py` | Software citation strings |
+| `validation.py` | Published table values, calculated benchmarks and comparisons for the validation section |
+| `tests/`, `scripts/` | pytest suite (science, AppTest, Playwright, exports) and CI helper script |
+
+In Positron, select the `.venv` interpreter and use the Run App button on `app.py`.
 
 ## Method and sources
 
 Saturation vapour pressure uses FAO-56 Eq. 11 (Allen et al., 1998, https://www.fao.org/4/x0490e/x0490e07.htm).
 Full APA 7 references are in the app under Methods & References.
+
+Notes: unattainable RH (outside 0-100 %) is reported, never clipped; negative leaf VPD is allowed and flagged;
+leaf-offset presets are illustrative scenarios, not universal correction factors.
 
 ## Citation
 

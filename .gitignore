@@ -7,3 +7,6 @@ __pycache__/
 .vscode/
 .posit/
 vpd_calculator/tests/artifacts/
+
+# Local agent instructions (personal, not published)
+AGENTS.md
