@@ -293,3 +293,32 @@ def test_mpl_zero_boundary_drawn_only_when_crossing():
                 mpl_export.heatmap_mpl(10, 40, 10, 100, vpd.AIR, -2.0)):
         assert _mpl_zero_artists(fig) == []
         assert "possible condensation" not in fig.get_supxlabel()
+
+
+# ---- comparison-treatment markers ----------------------------------------------------------------------
+MARKERS = [
+    {"name": "Cool", "t_air": 22.0, "rh": 60.0, "offset": -2.0, "t_leaf": 20.0,
+     "vpd_air": vpd.vpd_air(22, 60), "vpd_leaf": vpd.vpd_leaf(22, 60, 20)},
+    {"name": "Warm", "t_air": 33.0, "rh": 60.0, "offset": 1.0, "t_leaf": 34.0,
+     "vpd_air": vpd.vpd_air(33, 60), "vpd_leaf": vpd.vpd_leaf(33, 60, 34)},
+]
+
+
+def test_treatment_markers_are_labelled_distinct_from_the_star_and_show_their_own_values():
+    base = plots.heatmap_figure(10, 40, 20, 100, vpd.LEAF, 0.0, point=(22, 60), target=(0.8, 1.2), target_kind=vpd.AIR)
+    fig = plots.heatmap_figure(10, 40, 20, 100, vpd.LEAF, 0.0, point=(22, 60), target=(0.8, 1.2), target_kind=vpd.AIR,
+                               treatments=MARKERS)
+    (trace,) = [t for t in fig.data if t.name == "Comparison treatments"]
+    assert list(trace.x) == [22.0, 33.0] and list(trace.y) == [60.0, 60.0] and list(trace.text) == ["Cool", "Warm"]
+    star = [t for t in fig.data if t.name == "Selected"][0]
+    assert trace.marker.symbol == "diamond" and star.marker.symbol == "star" and trace.marker.color != star.marker.color
+    hover = trace.hovertext[0]
+    for part in ("Cool", "Air 22.0 °C, RH 60.0 %", "Leaf offset -2.0 °C, leaf 20.0 °C",
+                 f"Air VPD {vpd.vpd_air(22, 60):.1f} kPa", f"Leaf VPD {vpd.vpd_leaf(22, 60, 20):.1f} kPa"):
+        assert part in hover
+    # the existing layers are untouched and the star stays on top
+    assert [type(t).__name__ for t in fig.data][:-2] == [type(t).__name__ for t in base.data][:-1]
+    assert fig.data[-1].name == "Selected"
+    assert np.array_equal(np.asarray(fig.data[0].z), np.asarray(base.data[0].z))
+    assert [t.name for t in fig.data if t.name != "Comparison treatments"] == [t.name for t in base.data]
+    assert all(t.name != "Comparison treatments" for t in plots.heatmap_figure(10, 40, 20, 100).data)

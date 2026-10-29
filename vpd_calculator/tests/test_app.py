@@ -1189,3 +1189,56 @@ def test_compare_table_edits_add_invalid_rows_and_stay_independent(monkeypatch):
 def pd_isna(x):
     import math
     return x is None or (isinstance(x, float) and math.isnan(x))
+
+
+# ---- comparison-treatment markers on the heatmap ----------------------------------------------------------
+def treatment_trace(at):
+    return [d for d in heatmap_spec(at)["data"] if d.get("name") == "Comparison treatments"]
+
+
+def heatmap_captions(at):
+    return " ".join(c.value for c in at.tabs[3].caption)
+
+
+def test_treatment_markers_toggle_hover_explanation_and_edits(monkeypatch):
+    at = new_app().run()
+    assert at.checkbox(key="hm_treatments").value is False and treatment_trace(at) == []
+    assert "not yet included in the figure downloads" in heatmap_captions(at)
+    at.session_state["cmp_editor"] = {
+        "edited_rows": {0: {treat.OFFSET: -2.0}, 1: {treat.OFFSET: 1.0}},
+        "added_rows": [{treat.NAME: "Far", treat.T_AIR: 50.0, treat.RH: 60.0, treat.OFFSET: 0.0},
+                       {treat.NAME: "Broken", treat.T_AIR: 25.0}],
+        "deleted_rows": [],
+    }
+    at.radio(key="hm_kind").set_value(share.LEAF_LABEL)
+    at.checkbox(key="hm_treatments").set_value(True).run()
+    assert not at.exception
+    (trace,) = treatment_trace(at)
+    assert trace["x"] == [22.0, 33.0] and trace["y"] == [60.0, 60.0]                    # Far (outside) and Broken skipped
+    assert trace["text"] == ["Example A (22 °C, 60 % RH)", "Example B (33 °C, 60 % RH)"]
+    a, b = trace["hovertext"]
+    assert "Leaf offset -2.0 °C, leaf 20.0 °C" in a and f"Leaf VPD {vpd.vpd_leaf(22, 60, 20):.1f} kPa" in a
+    assert "Leaf offset +1.0 °C, leaf 34.0 °C" in b and f"Air VPD {vpd.vpd_air(33, 60):.1f} kPa" in b
+    text = heatmap_captions(at)
+    assert "1 calculated treatment is outside the displayed axes" in text
+    assert "Marker values use each treatment's own leaf offset" in text and "Calculator's offset (+0.0 °C)" in text
+    # background, target and star layers are unchanged by the markers
+    names = [d.get("name") for d in heatmap_spec(at)["data"]]
+    assert names.count("Selected") == 1 and names[-1] == "Selected"
+    # editing a treatment updates the marker and its hover values
+    at.session_state["cmp_editor"] = {
+        "edited_rows": {0: {treat.T_AIR: 25.0, treat.OFFSET: 0.0}, 1: {treat.OFFSET: 1.0}},
+        "added_rows": [], "deleted_rows": [1]}
+    at.run()
+    (trace,) = treatment_trace(at)
+    assert trace["x"] == [25.0] and "Leaf offset +0.0 °C, leaf 25.0 °C" in trace["hovertext"][0]
+    assert "outside the displayed axes" not in heatmap_captions(at)
+    assert "Marker values use" not in heatmap_captions(at)                             # offsets now equal the Calculator's
+
+
+def test_treatment_markers_without_leaf_vpd_in_the_chart_need_no_offset_explanation():
+    at = new_app()
+    at.session_state["cmp_editor"] = {"edited_rows": {0: {treat.OFFSET: -2.0}}, "added_rows": [], "deleted_rows": []}
+    at.run()
+    at.checkbox(key="hm_treatments").set_value(True).run()                              # air heatmap, air target
+    assert len(treatment_trace(at)) == 1 and "Marker values use" not in heatmap_captions(at)

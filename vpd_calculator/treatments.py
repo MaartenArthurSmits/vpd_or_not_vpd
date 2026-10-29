@@ -66,6 +66,21 @@ def evaluate(rows: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(out, columns=INPUTS + RESULTS + [STATUS])
 
 
+def markers_in_view(results: pd.DataFrame, t_min, t_max, rh_min, rh_max) -> tuple[list, int]:
+    """Calculated rows that fall inside the displayed axes (as dicts) and the number of calculated rows outside.
+
+    Invalid or incomplete rows have no results and are skipped.
+    """
+    inside, outside = [], 0
+    for _, row in results[results[VPD_AIR].notna()].iterrows():
+        if t_min <= row[T_AIR] <= t_max and rh_min <= row[RH] <= rh_max:
+            inside.append({"name": row[NAME], "t_air": row[T_AIR], "rh": row[RH], "offset": row[OFFSET],
+                           "t_leaf": row[T_LEAF], "vpd_air": row[VPD_AIR], "vpd_leaf": row[VPD_LEAF]})
+        else:
+            outside += 1
+    return inside, outside
+
+
 def to_csv(results: pd.DataFrame) -> bytes:
     """Inputs and results at full precision (blank where a row was not calculated)."""
     return results.to_csv(index=False).encode("utf-8")

@@ -503,6 +503,10 @@ with tab_heat:
     o1, o2 = st.columns(2)
     show_target = o1.checkbox("Highlight target range from Calculator tab", value=True, key="hm_target")
     show_point = o2.checkbox("Mark selected temperature/RH", value=True, key="hm_point")
+    show_treatments = st.checkbox("Show comparison treatments", value=False, key="hm_treatments",
+                                  help="Markers for the valid rows of the Compare treatments tab.")
+    st.caption("Comparison markers appear in this interactive chart only; they are not yet included in the "
+               "figure downloads.")
     hm_kind = kind_from_label(hm_kind_label)
 
     if t_min >= t_max or rh_min >= rh_max:
@@ -518,9 +522,20 @@ with tab_heat:
                 note += (f" The offset is derived from the measured leaf temperature ({measured:.1f} °C) and the "
                          f"Calculator's air temperature ({t_air:.1f} °C).")
             st.caption(note)
+        markers, n_outside = ([], 0)
+        if show_treatments:
+            markers, n_outside = treatments.markers_in_view(compared, t_min, t_max, rh_min, rh_max)
         fig = plots.heatmap_figure(t_min, t_max, rh_min, rh_max, hm_kind, offset, cscale, cstep,
-                                   zmax_in or None, pt, tg, target_kind=ikind)
+                                   zmax_in or None, pt, tg, target_kind=ikind, treatments=markers or None)
         st.plotly_chart(fig, width="stretch", config={"toImageButtonOptions": {"format": "png", "scale": 2}})
+        if n_outside:
+            st.caption(f"{n_outside} calculated treatment{'s are' if n_outside > 1 else ' is'} outside the "
+                       "displayed axes and not shown.")
+        leaf_in_chart = hm_kind == vpd.LEAF or (tg is not None and ikind == vpd.LEAF)
+        if leaf_in_chart and any(abs(m["offset"] - offset) > 1e-9 for m in markers):
+            st.caption(f"Marker values use each treatment's own leaf offset; the chart background uses the "
+                       f"Calculator's offset ({offset:+.1f} °C), so a marker's leaf VPD can differ from the "
+                       "background colour at its position.")
         if any(trace.name == vpd.ZERO_LABEL for trace in fig.data):
             st.caption("Negative leaf VPD (beyond the saturation line) indicates possible condensation.")
         if tg:

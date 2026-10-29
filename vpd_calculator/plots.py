@@ -14,11 +14,13 @@ COLORSCALES = ["RdYlBu_r", "Viridis", "Turbo", "Cividis", "Plasma", "YlGnBu", "S
 def heatmap_figure(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0,
                    colorscale="RdYlBu_r", contour_step=0.5, z_max=None,
                    point=None, target=None, template=None,
-                   width=None, height=650, target_kind=None) -> go.Figure:
+                   width=None, height=650, target_kind=None, treatments=None) -> go.Figure:
     """Temperature x RH heatmap with labelled contours.
 
     point  : (t_air, rh) selected state or None
     target : (vpd_low, vpd_high) user-defined interval or None
+    treatments : list of dicts (name, t_air, rh, offset, t_leaf, vpd_air, vpd_leaf) drawn as labelled markers;
+                 their values use each treatment's own leaf offset, not the chart's.
     target_kind : VPD type the target interval refers to (default: same as `kind`). The colours
                   follow `kind`; the target shading and dashed contours follow `target_kind`.
     """
@@ -77,6 +79,19 @@ def heatmap_figure(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0,
                           labelfont=dict(size=12, color="black")),
             line=dict(width=3, dash="dash"), colorscale=[[0, "black"], [1, "black"]],
             name=vpd.target_label(tkind, lo, hi), showlegend=True,
+        ))
+
+    if treatments:
+        fig.add_trace(go.Scatter(
+            x=[m["t_air"] for m in treatments], y=[m["rh"] for m in treatments], mode="markers+text",
+            name="Comparison treatments", text=[m["name"] for m in treatments], textposition="top center",
+            textfont=dict(size=11, color="black"),
+            marker=dict(symbol="diamond", size=13, color="black", line=dict(color="white", width=2)),
+            hoverinfo="text",
+            hovertext=[(f"<b>{m['name']}</b><br>Air {m['t_air']:.1f} °C, RH {m['rh']:.1f} %<br>"
+                        f"Leaf offset {m['offset']:+.1f} °C, leaf {m['t_leaf']:.1f} °C<br>"
+                        f"Air VPD {m['vpd_air']:.1f} kPa<br>Leaf VPD {m['vpd_leaf']:.1f} kPa")
+                       for m in treatments],
         ))
 
     if point is not None:

@@ -62,3 +62,13 @@ def test_csv_has_inputs_and_results_at_full_precision():
     assert csv.loc[0, tr.VPD_AIR] == pytest.approx(ref.vpd_air, abs=1e-12) and csv.loc[0, tr.VPD_AIR] != round(ref.vpd_air, 1)
     assert csv.loc[0, tr.T_AIR] == 22.34 and csv.loc[0, tr.OFFSET] == -1.5
     assert math.isnan(csv.loc[1, tr.VPD_AIR]) and "not calculated" in csv.loc[1, tr.STATUS]
+
+
+def test_markers_in_view_skip_invalid_rows_and_count_those_outside_the_axes():
+    out = tr.evaluate(rows(("In A", 22.0, 60.0, -2.0), ("In B", 33.0, 60.0, 1.0), ("Far", 50.0, 60.0, 0.0),
+                           ("Dry", 22.0, 5.0, 0.0), ("Broken", 22.0, None, 0.0)))
+    inside, outside = tr.markers_in_view(out, 10, 40, 20, 100)
+    assert [m["name"] for m in inside] == ["In A", "In B"] and outside == 2          # Far and Dry; Broken is skipped
+    a = inside[0]
+    ref = vpd.calculate_vpd(22.0, 60.0, -2.0)
+    assert (a["t_leaf"], a["vpd_air"], a["vpd_leaf"], a["offset"]) == (ref.t_leaf, ref.vpd_air, ref.vpd_leaf, -2.0)
