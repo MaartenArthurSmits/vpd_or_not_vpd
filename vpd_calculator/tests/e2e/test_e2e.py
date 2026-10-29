@@ -35,8 +35,10 @@ def open_tab(page, name):
 
 
 def choose(page, combobox_name, option):
-    page.get_by_role("combobox", name=combobox_name).first.click()
-    page.get_by_role("option", name=option, exact=True).click()
+    combo = page.get_by_role("combobox", name=combobox_name, exact=True).locator("visible=true").first
+    combo.click()
+    combo.fill(option)
+    combo.press("Enter")
 
 
 def download(page, button_name, artifacts_dir, filename):
