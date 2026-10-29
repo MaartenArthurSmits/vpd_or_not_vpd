@@ -60,6 +60,14 @@ def heatmap_figure(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0,
         line=dict(width=1), colorscale=[[0, "rgba(0,0,0,0.55)"], [1, "rgba(0,0,0,0.55)"]],
     ))
 
+    if kind == vpd.LEAF and vpd.zero_boundary_in_range(z):       # leaf saturation boundary (existing grid)
+        fig.add_trace(go.Contour(
+            z=z, x=temps, y=rhs, showscale=False, hoverinfo="skip",
+            contours=dict(coloring="lines", showlabels=False, start=0.0, end=0.0, size=1.0),
+            line=dict(width=4, color=vpd.ZERO_COLOUR), colorscale=[[0, vpd.ZERO_COLOUR], [1, vpd.ZERO_COLOUR]],
+            name=vpd.ZERO_LABEL, showlegend=True,
+        ))
+
     if target is not None:
         lo, hi = target
         fig.add_trace(go.Contour(

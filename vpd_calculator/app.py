@@ -479,8 +479,9 @@ with tab_heat:
         pt = (t_air, current_rh) if (show_point and current_rh is not None) else None
         tg = (lo, hi) if (show_target and interval_ok) else None
         if hm_kind == vpd.LEAF or (tg is not None and ikind == vpd.LEAF):      # leaf VPD is used by the chart
-            note = (f"Leaf VPD here assumes one constant leaf–air offset of {offset:+.1f} °C at every air "
-                    f"temperature (for example, 30 °C air is {30 + offset:.0f} °C leaf).")
+            sign = "−" if offset < 0 else "+"
+            note = (f"Leaf VPD here assumes one constant leaf–air offset of {offset:+.1f} °C: leaf temperature = "
+                    f"air temperature {sign} {abs(offset):.1f} °C throughout this chart.")
             if measured is not None:
                 note += (f" The offset is derived from the measured leaf temperature ({measured:.1f} °C) and the "
                          f"Calculator's air temperature ({t_air:.1f} °C).")
@@ -488,6 +489,8 @@ with tab_heat:
         fig = plots.heatmap_figure(t_min, t_max, rh_min, rh_max, hm_kind, offset, cscale, cstep,
                                    zmax_in or None, pt, tg, target_kind=ikind)
         st.plotly_chart(fig, width="stretch", config={"toImageButtonOptions": {"format": "png", "scale": 2}})
+        if any(trace.name == vpd.ZERO_LABEL for trace in fig.data):
+            st.caption("Negative leaf VPD (beyond the saturation line) indicates possible condensation.")
         if tg:
             if vpd.is_point_target(lo, hi):
                 st.caption(f"Dashed contour: user-defined single-value target **{ikind} VPD** "

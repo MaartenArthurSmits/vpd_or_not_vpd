@@ -83,6 +83,10 @@ def _heatmap_block(h: dict) -> list:
         f"  {scale} +",
         "  geom_contour(aes(z = vpd), breaks = contour_breaks, colour = \"black\", alpha = 0.55, linewidth = 0.3) +",
     ]
+    zero_drawn = kind == vpd.LEAF and vpd.zero_boundary_in_range(z)
+    if zero_drawn:      # leaf saturation boundary, drawn only where it crosses the displayed grid
+        L += [f"  geom_contour(aes(z = vpd, colour = \"{vpd.ZERO_LABEL}\"), breaks = 0, linewidth = 1.4) +",
+              f"  scale_colour_manual(values = c(\"{vpd.ZERO_LABEL}\" = \"{vpd.ZERO_COLOUR}\"), name = NULL) +"]
     if h.get("target") is not None:
         lo, hi = h["target"]
         L += [f"  geom_contour(aes(z = vpd_target), breaks = unique(c({_num(lo)}, {_num(hi)})), colour = \"black\",",
@@ -98,7 +102,8 @@ def _heatmap_block(h: dict) -> list:
         f"       fill = \"{label} (kPa)\",",
         f"       title = \"{label} as a function of temperature and relative humidity\",",
         *([f"       subtitle = \"{subtitle_target}\","] if h.get("target") is not None else []),
-        "       caption = \"Saturation vapour pressure: FAO-56 (Allen et al., 1998), Eq. 11\") +",
+        f"       caption = \"Saturation vapour pressure: FAO-56 (Allen et al., 1998), Eq. 11"
+        f"{'. Negative leaf VPD indicates possible condensation.' if zero_drawn else ''}\") +",
         "  theme_minimal(base_size = 12)",
         "",
         "# Optional contour labels if the metR package is available",

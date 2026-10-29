@@ -197,6 +197,19 @@ def classify_vpd(value: float, low: float, high: float) -> str:
     return "inside"
 
 
+def zero_boundary_in_range(z) -> bool:
+    """True when the VPD = 0 line crosses the displayed grid (strictly negative and positive values both present).
+
+    A boundary that is absent, or that only touches an outer edge (e.g. VPD = 0 only at 100 % RH), is not drawn.
+    """
+    z = np.asarray(z, dtype=float)
+    return bool(np.nanmin(z) < -1e-12 and np.nanmax(z) > 1e-12)
+
+
+ZERO_LABEL = "Leaf saturation: VPD = 0 kPa"
+ZERO_COLOUR = "#c2185b"          # distinct from the black ordinary/target contours
+
+
 def is_point_target(low: float, high: float) -> bool:
     """True when the lower and upper limits are equal, i.e. the target is a single VPD value."""
     return low == high

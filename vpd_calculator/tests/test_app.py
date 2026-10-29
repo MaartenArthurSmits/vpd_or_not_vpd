@@ -744,7 +744,9 @@ def test_heatmap_link_restores_controls_and_chart_alongside_other_settings():
     heat = spec["data"][0]
     assert heat["zmax"] == 3.5 and heat["colorbar"]["title"]["text"] == "Leaf VPD (kPa)"
     assert heat["colorscale"][0][1] == "#440154"                                   # Viridis
-    assert [d["type"] for d in spec["data"]] == ["heatmap", "contour"]             # no target layers, no point
+    # no target layers or point; the extra contour is the leaf VPD = 0 line (-2 degC offset crosses the chart)
+    assert [d["type"] for d in spec["data"]] == ["heatmap", "contour", "contour"]
+    assert spec["data"][2]["name"] == "Leaf saturation: VPD = 0 kPa"
     assert spec["data"][1]["contours"]["size"] == 0.2
     # calculator and day/night settings are restored as well
     s = at.session_state
@@ -1039,14 +1041,24 @@ def leaf_note(at):
 def test_heatmap_leaf_assumption_caption_for_leaf_colours_and_leaf_targets():
     at = app_with_params({"hk": "leaf", "off": "-2"})                       # leaf heatmap, offset input
     (note,) = leaf_note(at)
-    assert "-2.0 °C" in note and "30 °C air is 28 °C leaf" in note and "derived" not in note
+    assert "-2.0 °C" in note and "air temperature − 2.0 °C throughout this chart" in note and "derived" not in note
     at = app_with_params({"hk": "air", "ik": "leaf", "hg": "1", "off": "-2"})   # air heatmap, leaf target shown
     assert len(leaf_note(at)) == 1
     # measured leaf temperature: 22 degC air, 20 degC leaf -> -2 degC offset, explained
     at = app_with_params({"hk": "air", "ik": "leaf", "t": "22", "lm": "20"})
     (note,) = leaf_note(at)
-    assert "-2.0 °C" in note and "30 °C air is 28 °C leaf" in note
+    assert "-2.0 °C" in note and "air temperature − 2.0 °C throughout this chart" in note
+    assert "30 °C" not in note
     assert "measured leaf temperature (20.0 °C)" in note and "air temperature (22.0 °C)" in note
+
+
+def test_heatmap_condensation_note_only_when_the_zero_line_is_drawn():
+    def notes(params):
+        return [c.value for c in new_app_with(params).tabs[2].caption if "possible condensation" in c.value]
+    new_app_with = app_with_params
+    assert len(notes({"hk": "leaf", "off": "-2"})) == 1          # zero boundary crosses the chart
+    assert notes({"hk": "leaf", "off": "0"}) == []               # VPD = 0 only at the 100 % RH edge
+    assert notes({"hk": "air", "off": "-2"}) == []               # air heatmaps are unchanged
 
 
 def test_heatmap_leaf_assumption_caption_absent_without_leaf_use():

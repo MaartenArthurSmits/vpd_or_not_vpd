@@ -55,6 +55,10 @@ def heatmap_mpl(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0, colorsca
         ax.clabel(cs, fmt="%.1f", fontsize=8)
 
     handles = []
+    zero_drawn = kind == vpd.LEAF and vpd.zero_boundary_in_range(z)
+    if zero_drawn:
+        ax.contour(temps, rhs, z, levels=[0.0], colors=vpd.ZERO_COLOUR, linewidths=3.2, linestyles="-")
+        handles.append(Line2D([], [], color=vpd.ZERO_COLOUR, linewidth=3.2, label=vpd.ZERO_LABEL))
     if target is not None:
         lo, hi = target
         if hi > lo:
@@ -80,6 +84,8 @@ def heatmap_mpl(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0, colorsca
     ax.set_xlabel("Air temperature (°C)")
     ax.set_ylabel("Relative humidity (%)")
     subtitle = f"leaf offset {offset:+.1f} °C; " if kind == vpd.LEAF else ""
+    if zero_drawn:
+        subtitle += "negative leaf VPD indicates possible condensation; "
     ax.set_title(f"{label} (kPa) as a function of temperature and relative humidity\n"
                  f"({subtitle}saturation vapour pressure: FAO-56, Allen et al. 1998, Eq. 11)", fontsize=11)
     return fig

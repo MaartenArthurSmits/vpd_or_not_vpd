@@ -202,3 +202,14 @@ def test_r_script_range_target_wording_is_unchanged():
     s = rscript.build_r_script(True, 22.0, 60.0, 1.0, vpd.AIR, 20.0, (0.8, 1.2), vpd.AIR, heatmap=h)
     assert 'subtitle = "Dashed contours: target Air VPD 0.8-1.2 kPa"' in s
     assert "# User-defined target range for air VPD" in s
+
+
+def test_r_script_zero_boundary_only_when_it_crosses_the_leaf_grid():
+    def script(kind, offset):
+        h = HEATMAP | {"kind": kind, "offset": offset, "target": None}
+        return rscript.build_r_script(True, 22.0, 60.0, 1.0, vpd.AIR, 22.0 + offset, None, vpd.AIR, heatmap=h)
+    crossing = script(vpd.LEAF, -2.0)
+    assert 'aes(z = vpd, colour = "Leaf saturation: VPD = 0 kPa"), breaks = 0' in crossing
+    assert "scale_colour_manual" in crossing and "possible condensation" in crossing
+    for s in (script(vpd.LEAF, 0.0), script(vpd.LEAF, 2.0), script(vpd.AIR, -2.0)):
+        assert "Leaf saturation" not in s and "possible condensation" not in s

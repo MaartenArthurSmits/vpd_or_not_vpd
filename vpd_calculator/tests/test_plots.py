@@ -43,7 +43,7 @@ def test_heatmap_leaf_offset_changes_values():
 def test_heatmap_target_and_point_layers():
     fig = plots.heatmap_figure(10, 40, 20, 100, point=(22, 60), target=(0.8, 1.2))
     assert kinds(fig) == ["Heatmap", "Heatmap", "Contour", "Contour", "Scatter"]
-    target = fig.data[3].contours
+    target = target_trace(fig).contours
     assert target.start == 0.8 and target.end == 1.2
     mask = np.asarray(fig.data[1].z, dtype=float)
     assert np.isnan(mask).any() and (mask[~np.isnan(mask)] == 1).all()
@@ -114,6 +114,12 @@ T_AIR, RH, OFFSET, TARGET = 22.0, 60.0, -2.0, (0.8, 1.2)
 BOTH = [vpd.AIR, vpd.LEAF]
 
 
+def target_trace(fig):
+    """The dashed target contour (not the overlay, the ordinary contours or the zero-VPD line)."""
+    (trace,) = [t for t in fig.data if type(t).__name__ == "Contour" and (t.name or "").startswith("Target")]
+    return trace
+
+
 def test_acceptance_point_values():
     assert vpd.vpd_air(T_AIR, RH) == pytest.approx(1.05757, abs=1e-5)
     assert vpd.vpd_leaf(T_AIR, RH, T_AIR + OFFSET) == pytest.approx(0.75192, abs=1e-5)
@@ -130,7 +136,7 @@ def _cell(fig_trace, x=T_AIR, y=RH):
 def test_plotly_target_follows_target_kind_on_both_heatmaps(hm_kind, target_kind, inside):
     fig = plots.heatmap_figure(10, 40, 20, 100, hm_kind, OFFSET, point=(T_AIR, RH), target=TARGET,
                                target_kind=target_kind)
-    colours, mask, target_contour = fig.data[0], fig.data[1], fig.data[3]
+    colours, mask, target_contour = fig.data[0], fig.data[1], target_trace(fig)
     i, j = _cell(mask)
     assert (not np.isnan(mask.z[i][j])) is inside
     # colours still follow the heatmap's own VPD type
@@ -147,13 +153,13 @@ def test_plotly_target_region_is_identical_for_both_heatmap_views(target_kind):
     figs = [plots.heatmap_figure(10, 40, 20, 100, k, OFFSET, target=TARGET, target_kind=target_kind) for k in BOTH]
     m0, m1 = (np.asarray(f.data[1].z, dtype=float) for f in figs)
     assert np.array_equal(np.isnan(m0), np.isnan(m1))
-    assert np.array_equal(np.asarray(figs[0].data[3].z), np.asarray(figs[1].data[3].z))
+    assert np.array_equal(np.asarray(target_trace(figs[0]).z), np.asarray(target_trace(figs[1]).z))
 
 
 def test_plotly_target_kind_defaults_to_heatmap_kind():
     fig = plots.heatmap_figure(10, 40, 20, 100, vpd.LEAF, OFFSET, target=TARGET)
     explicit = plots.heatmap_figure(10, 40, 20, 100, vpd.LEAF, OFFSET, target=TARGET, target_kind=vpd.LEAF)
-    assert np.array_equal(np.asarray(fig.data[3].z), np.asarray(explicit.data[3].z))
+    assert np.array_equal(np.asarray(target_trace(fig).z), np.asarray(target_trace(explicit).z))
 
 
 def _mpl_target_artists(fig):
@@ -225,12 +231,12 @@ def test_plotly_range_target_still_has_overlay_and_range_label():
     fig = plots.heatmap_figure(10, 40, 20, 100, vpd.AIR, OFFSET, target=TARGET, target_kind=vpd.AIR)
     assert kinds(fig) == ["Heatmap", "Heatmap", "Contour", "Contour"]
     assert fig.data[1].name == "Target Air VPD 0.8-1.2 kPa (overlay)"
-    assert fig.data[3].name == "Target Air VPD 0.8-1.2 kPa"
+    assert target_trace(fig).name == "Target Air VPD 0.8-1.2 kPa"
 
 
 def test_plotly_single_target_contour_is_drawn_at_the_value():
     fig = plots.heatmap_figure(10, 40, 20, 100, vpd.LEAF, OFFSET, target=POINT, target_kind=vpd.AIR)
-    z = np.asarray(fig.data[2].z)
+    z = np.asarray(target_trace(fig).z)
     assert z.min() < 1.0 < z.max()                       # the 1.0 kPa level crosses the grid
 
 
@@ -254,3 +260,36 @@ def test_vpd_vs_rh_single_target_is_a_line_not_a_band():
     fig = plots.vpd_vs_rh_figure(22, 0, vpd.AIR, rh_range=rr, point_rh=60)
     assert [s.type for s in fig.layout.shapes].count("rect") == 0
     assert any(a.text == "target RH" for a in fig.layout.annotations)
+
+
+# ---- leaf saturation (VPD = 0) boundary ----------------------------------------------------------------
+ZERO = "Leaf saturation: VPD = 0 kPa"
+
+
+def test_plotly_zero_boundary_only_on_leaf_heatmaps_where_it_crosses():
+    crossing = plots.heatmap_figure(10, 40, 10, 100, vpd.LEAF, -2.0, target=TARGET, target_kind=vpd.AIR)
+    zero = [t for t in crossing.data if t.name == ZERO]
+    assert len(zero) == 1 and zero[0].showlegend and zero[0].contours.start == zero[0].contours.end == 0.0
+    assert zero[0].line.color != "black"                                  # distinct from target/ordinary contours
+    assert np.min(crossing.data[0].z) < 0                                 # negative values are preserved
+    for fig in (plots.heatmap_figure(10, 40, 10, 100, vpd.LEAF, 0.0),     # touches only the 100 % RH edge
+                plots.heatmap_figure(10, 40, 10, 100, vpd.LEAF, 2.0),     # entirely positive
+                plots.heatmap_figure(10, 40, 10, 100, vpd.AIR, -2.0)):    # air heatmaps unchanged
+        assert all(t.name != ZERO for t in fig.data)
+
+
+def _mpl_zero_artists(fig):
+    return [c for c in fig.axes[0].collections if len(c.get_linewidths()) and abs(c.get_linewidths()[0] - 3.2) < 1e-9]
+
+
+def test_mpl_zero_boundary_drawn_only_when_crossing():
+    crossing = mpl_export.heatmap_mpl(10, 40, 10, 100, vpd.LEAF, -2.0, point=(T_AIR, RH))
+    assert len(_mpl_zero_artists(crossing)) == 1
+    assert ZERO in [t.get_text() for t in crossing.axes[0].get_legend().get_texts()]
+    assert "possible condensation" in crossing.axes[0].get_title()
+    assert mpl_export.to_bytes(crossing, "png", 80)[:4] == b"\x89PNG" and mpl_export.to_bytes(crossing, "pdf")[:5] == b"%PDF-"
+    for fig in (mpl_export.heatmap_mpl(10, 40, 10, 100, vpd.LEAF, 0.0),
+                mpl_export.heatmap_mpl(10, 40, 10, 100, vpd.LEAF, 2.0),
+                mpl_export.heatmap_mpl(10, 40, 10, 100, vpd.AIR, -2.0)):
+        assert _mpl_zero_artists(fig) == []
+        assert "possible condensation" not in fig.axes[0].get_title()
