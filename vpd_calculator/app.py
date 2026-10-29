@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import importlib
+from pathlib import Path
+
 import pandas as pd
 import streamlit as st
 
@@ -11,6 +14,24 @@ import rscript
 import share
 import validation
 import vpd
+
+
+
+def _refresh_helper_modules():
+    """Reload helper modules whose file changed.
+
+    Streamlit Cloud re-runs app.py after a push but keeps already-imported helper modules in
+    memory, which can leave a new app.py talking to an old module.
+    """
+    for name in ("vpd", "share", "logger_data", "validation", "plots", "rscript"):
+        mod = importlib.import_module(name)
+        stamp = Path(mod.__file__).stat().st_mtime_ns
+        if getattr(mod, "_loaded_stamp", None) != stamp:
+            importlib.reload(mod)
+            mod._loaded_stamp = stamp
+
+
+_refresh_helper_modules()
 
 st.set_page_config(page_title="VPD Calculator", page_icon="🌿", layout="wide")
 
