@@ -46,9 +46,36 @@ def test_default_run_has_no_exceptions_and_known_values():
     assert metric(at, "Air VPD") == f"{vpd.vpd_air(22, 60):.1f} kPa" == "1.1 kPa"
 
 
-def test_exactly_three_tabs():
+def test_exactly_four_tabs():
     at = new_app().run()
-    assert [t.label for t in at.tabs] == ["Calculator", "VPD Heatmap", "Methods & References"]
+    assert [t.label for t in at.tabs] == ["Calculator", "Day & Night", "VPD Heatmap", "Methods & References"]
+
+
+def test_day_night_controls_and_results_are_in_their_own_tab_only():
+    at = new_app().run()
+    calc, daynight = at.tabs[0], at.tabs[1]
+    day_night_keys = ("dn_t_day__num", "dn_off_night__num", "dn_lo_day__num", "dn_hi_night__num")
+    assert all(any(w.key == k for w in daynight.number_input) for k in day_night_keys)
+    assert not any(w.key.startswith("dn_") for w in calc.number_input)
+    assert not any(w.key.startswith("dn_") for w in calc.selectbox)
+    assert {w.key for w in daynight.radio} >= {"dn_kind_day", "dn_kind_night"}
+    assert {w.key for w in daynight.selectbox} >= {"dn_preset_day", "dn_preset_night"}
+    assert not any(w.key.startswith("dn_") for w in calc.radio)
+    assert any(m.label.startswith("Day RH range") for m in daynight.metric)
+    assert any(m.label.startswith("Night RH range") for m in daynight.metric)
+    assert not any(m.label.startswith(("Day ", "Night ")) for m in calc.metric)
+    assert any("Condensation guidance" in i.value for i in daynight.info)
+    assert not any("Condensation guidance" in i.value for i in calc.info)
+
+
+def test_day_night_settings_are_independent_of_calculator_and_survive_reruns():
+    at = new_app().run()
+    set_num(at, "dn_t_day", 30.0)
+    set_num(at, "t_air", 18.0)
+    at.run()
+    assert at.session_state["dn_t_day"] == 30.0 and at.session_state["t_air"] == 18.0
+    assert at.session_state["dn_t_night"] == 17.0
+    assert qp(at, "dt") == "30" and qp(at, "t") == "18"
 
 
 def test_interface_values_use_one_decimal_place():

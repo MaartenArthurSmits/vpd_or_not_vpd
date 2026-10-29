@@ -10,14 +10,14 @@ built with Python, Streamlit and Plotly.
 
 ## Features
 
-Three tabs: **Calculator**, **VPD Heatmap**, **Methods & References**.
+Four tabs: **Calculator**, **Day & Night**, **VPD Heatmap**, **Methods & References**.
 
 - **Bidirectional calculator:** VPD from temperature and RH, or the RH required for a target air or leaf VPD.
 - **Leaf temperature:** an offset (illustrative scenarios 0, -1, -2, +1, +2 °C or custom) or a measured value, with an
   explanation of air versus leaf VPD.
 - **Target VPD range:** illustrative growth-stage presets (seedlings/propagation, vegetative, flowering, general
   horticulture) or a custom range, with the corresponding RH range.
-- **Day and night:** independently configured day and night temperature, leaf offset and target VPD range, with
+- **Day & Night tab:** independently configured day and night temperature, leaf offset and target VPD range, with
   required RH ranges and condensation guidance.
 - **Heatmap:** interactive temperature x RH plot (air or leaf VPD) with contours, target range and selected point.
 - **Exports:** grid CSV, settings CSV, publication-quality heatmap PNG (300 dpi) and PDF rendered with Matplotlib
@@ -74,7 +74,7 @@ Everything is in `vpd_calculator/`; run `streamlit run app.py` from that folder.
 
 | File | Purpose |
 |---|---|
-| `app.py` | Streamlit interface (three tabs) |
+| `app.py` | Streamlit interface (four tabs) |
 | `vpd.py` | Calculations (FAO-56), grids, condensation limit |
 | `presets.py` | Illustrative growth-stage ranges and leaf-offset scenarios, with sources and disclaimers |
 | `plots.py` | Interactive Plotly figures |

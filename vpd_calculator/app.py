@@ -172,7 +172,8 @@ def to_csv(df):
     return df.to_csv(index=False).encode("utf-8")
 
 
-tab_calc, tab_heat, tab_methods = st.tabs(["Calculator", "VPD Heatmap", "Methods & References"])
+tab_calc, tab_daynight, tab_heat, tab_methods = st.tabs(
+    ["Calculator", "Day & Night", "VPD Heatmap", "Methods & References"])
 
 # ==========================================================================
 # Calculator
@@ -326,8 +327,48 @@ Methods & References for sources and limitations.
             st.plotly_chart(plots.vpd_vs_rh_figure(t_air, offset, ikind, rh_range=rr, point_rh=current_rh),
                             width="stretch")
 
-    # ---- Day and night ranges (stacked) ---------------------------------------
+
+    # ---- Export current settings --------------------------------------------
     st.divider()
+    settings = pd.DataFrame(
+        [{"quantity": k, "value": v} for k, v in (
+            {"mode": results_row.get("mode"), "target_kind": results_row.get("kind"),
+             "target_vpd_kPa": results_row.get("target_vpd"),
+             "range_low_kPa": lo, "range_high_kPa": hi, "range_kind": ikind} |
+            {k: v for k, v in results_row.items()
+             if k not in ("mode", "kind", "target_vpd", "warnings", "message")}).items()])
+    st.download_button("Download current settings and results (CSV)", to_csv(settings),
+                       "vpd_current_settings.csv", "text/csv", key="dl_settings_csv")
+
+    # Keep the address bar in sync so the current URL is always a shareable link.
+    st.query_params.from_dict(share.build_params(st.session_state))
+    with st.expander("Share these settings"):
+        st.caption("Opening this link restores the calculator mode, temperature, RH, target VPD, "
+                   "leaf temperature and target range, plus, independently for day and night: air "
+                   "temperature, leaf-temperature offset, lower and upper VPD limits, whether the range "
+                   "applies to air or leaf VPD, and the selected growth-stage preset (or Custom). "
+                   "It also restores the heatmap settings: VPD type, temperature and RH limits, colour "
+                   "scale and maximum, contour spacing, and the target and selected-point toggles.")
+        st.code(share.share_url(st.session_state), language=None)
+        st.download_button("Download setup (JSON)", share.setup_json(st.session_state).encode("utf-8"),
+                           share.SETUP_FILENAME, "application/json", key="dl_setup_json")
+        st.caption("The JSON file records the calculation and heatmap settings (the same settings as the link), "
+                   "not results, images or other session data.")
+        st.file_uploader("Load setup (JSON)", type=["json"], key="setup_upload",
+                         help="Choosing a file does not change anything until you press Apply setup.")
+        st.button("Apply setup", key="setup_apply", on_click=apply_setup,
+                  disabled=st.session_state.get("setup_upload") is None)
+        st.caption("Applying a setup replaces the calculator, day/night and heatmap settings. Settings missing "
+                   "from the file return to their defaults; an invalid file changes nothing.")
+        _status = st.session_state.pop("_setup_status", None)
+        if _status:
+            (st.success if _status[0] == "ok" else st.error)(_status[1])
+
+# ==========================================================================
+# Day & Night
+# ==========================================================================
+with tab_daynight:
+    # ---- Day and night ranges (stacked) ---------------------------------------
     st.subheader("Day and night target VPD ranges")
     st.caption("Configure the day and night conditions independently. The required RH range is calculated "
                "at each period's own temperature and optional leaf offset. Presets are illustrative.")
@@ -401,42 +442,6 @@ Methods & References for sources and limitations.
 
     period_section("Day")
     period_section("Night")
-
-    # ---- Export current settings --------------------------------------------
-    st.divider()
-    settings = pd.DataFrame(
-        [{"quantity": k, "value": v} for k, v in (
-            {"mode": results_row.get("mode"), "target_kind": results_row.get("kind"),
-             "target_vpd_kPa": results_row.get("target_vpd"),
-             "range_low_kPa": lo, "range_high_kPa": hi, "range_kind": ikind} |
-            {k: v for k, v in results_row.items()
-             if k not in ("mode", "kind", "target_vpd", "warnings", "message")}).items()])
-    st.download_button("Download current settings and results (CSV)", to_csv(settings),
-                       "vpd_current_settings.csv", "text/csv", key="dl_settings_csv")
-
-    # Keep the address bar in sync so the current URL is always a shareable link.
-    st.query_params.from_dict(share.build_params(st.session_state))
-    with st.expander("Share these settings"):
-        st.caption("Opening this link restores the calculator mode, temperature, RH, target VPD, "
-                   "leaf temperature and target range, plus, independently for day and night: air "
-                   "temperature, leaf-temperature offset, lower and upper VPD limits, whether the range "
-                   "applies to air or leaf VPD, and the selected growth-stage preset (or Custom). "
-                   "It also restores the heatmap settings: VPD type, temperature and RH limits, colour "
-                   "scale and maximum, contour spacing, and the target and selected-point toggles.")
-        st.code(share.share_url(st.session_state), language=None)
-        st.download_button("Download setup (JSON)", share.setup_json(st.session_state).encode("utf-8"),
-                           share.SETUP_FILENAME, "application/json", key="dl_setup_json")
-        st.caption("The JSON file records the calculation and heatmap settings (the same settings as the link), "
-                   "not results, images or other session data.")
-        st.file_uploader("Load setup (JSON)", type=["json"], key="setup_upload",
-                         help="Choosing a file does not change anything until you press Apply setup.")
-        st.button("Apply setup", key="setup_apply", on_click=apply_setup,
-                  disabled=st.session_state.get("setup_upload") is None)
-        st.caption("Applying a setup replaces the calculator, day/night and heatmap settings. Settings missing "
-                   "from the file return to their defaults; an invalid file changes nothing.")
-        _status = st.session_state.pop("_setup_status", None)
-        if _status:
-            (st.success if _status[0] == "ok" else st.error)(_status[1])
 
 # ==========================================================================
 # Heatmap

@@ -57,8 +57,8 @@ def test_app_loads_with_default_result(page):
     assert page.title()
     page.get_by_text("Vapour Pressure Deficit calculator").first.wait_for()
     assert "1.1 kPa" in metric(page, "Air VPD").inner_text()
-    assert page.get_by_role("tab").count() == 3
-    for tab in ("Calculator", "VPD Heatmap", "Methods & References"):
+    assert page.get_by_role("tab").count() == 4
+    for tab in ("Calculator", "Day & Night", "VPD Heatmap", "Methods & References"):
         assert page.get_by_role("tab", name=tab).count() == 1
 
 
@@ -111,6 +111,8 @@ def test_growth_stage_preset_sets_range_and_shows_disclaimer(page):
 
 
 def test_day_and_night_sections(page):
+    assert page.get_by_role("heading", name="Day", exact=True).count() == 0      # not in the Calculator tab
+    open_tab(page, "Day & Night")
     page.get_by_role("heading", name="Day", exact=True).wait_for(timeout=TIMEOUT)
     page.get_by_role("heading", name="Night", exact=True).wait_for(timeout=TIMEOUT)
     assert page.get_by_role("heading", name="Day", exact=True).count() == 1
@@ -121,6 +123,9 @@ def test_day_and_night_sections(page):
     assert "15.0 °C" in metric(page, "Night RH range").inner_text()
     assert "22.0 °C" in metric(page, "Day RH range").inner_text()      # day unchanged
     page.get_by_text("Condensation guidance").first.wait_for()
+    open_tab(page, "Calculator")                                                  # settings survive tab changes
+    open_tab(page, "Day & Night")
+    assert num(page, "Night air temperature (°C)").input_value().startswith("15")
 
 
 def test_heatmap_controls(page):
@@ -245,7 +250,7 @@ def test_full_page_screenshots(browser, app_url, artifacts_dir, console_log, nam
     pg.on("pageerror", lambda e: console_log.append({"type": "pageerror", "text": str(e)}))
     pg.goto(app_url)
     pg.get_by_text("Calculation mode").first.wait_for(timeout=60_000)
-    for tab, slug in (("Calculator", "calculator"), ("VPD Heatmap", "heatmap"),
+    for tab, slug in (("Calculator", "calculator"), ("Day & Night", "daynight"), ("VPD Heatmap", "heatmap"),
                       ("Methods & References", "methods")):
         pg.get_by_role("tab", name=tab).click()
         pg.wait_for_timeout(1500)
