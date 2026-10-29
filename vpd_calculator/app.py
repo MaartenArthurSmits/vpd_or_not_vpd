@@ -386,7 +386,8 @@ Methods & References for sources and limitations.
                    "leaf temperature and target range, plus, independently for day and night: air "
                    "temperature, leaf-temperature offset, lower and upper VPD limits, whether the range "
                    "applies to air or leaf VPD, and the selected growth-stage preset (or Custom). "
-                   "Heatmap settings are not included.")
+                   "It also restores the heatmap settings: VPD type, temperature and RH limits, colour "
+                   "scale and maximum, contour spacing, and the target and selected-point toggles.")
         st.code(share.share_url(st.session_state), language=None)
 
 # ==========================================================================

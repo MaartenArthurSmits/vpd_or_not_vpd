@@ -29,6 +29,12 @@ _NUMERIC = {
     "lm": ("calc_leaf_meas", -5.0, 50.0),
     "lo": ("vpd_lo", 0.0, 10.0),
     "hi": ("vpd_hi", 0.0, 10.0),
+    # heatmap axis limits and colour-scale maximum (0 = automatic); bounds follow the control limits
+    "htmin": ("hm_tmin", -10.0, 60.0),
+    "htmax": ("hm_tmax", -10.0, 60.0),
+    "hrmin": ("hm_rhmin", 0.0, 99.0),
+    "hrmax": ("hm_rhmax", 1.0, 100.0),
+    "hz": ("hm_zmax", 0.0, 20.0),
 }
 _KIND = {"air": AIR_LABEL, "leaf": LEAF_LABEL}
 
@@ -42,6 +48,14 @@ _PERIOD_NUMERIC = {  # query suffix -> (session-state key pattern, min, max)
     "lo": ("dn_lo_{p}", 0.0, 10.0),
     "hi": ("dn_hi_{p}", 0.0, 10.0),
 }
+# Heatmap choices. The colour-scale names must match plots.COLORSCALES (checked by a test); the contour
+# spacing options match the "Contour spacing (kPa)" control. The heatmap has no separate grid-resolution control.
+_COLORSCALES = ["RdYlBu_r", "Viridis", "Turbo", "Cividis", "Plasma", "YlGnBu", "Spectral_r", "Greys"]
+_CONTOUR_STEPS = [0.1, 0.2, 0.5, 1.0]
+HEATMAP_DEFAULTS = {"hm_tmin": 10.0, "hm_tmax": 40.0, "hm_rhmin": 10.0, "hm_rhmax": 100.0, "hm_zmax": 0.0,
+                    "hm_cs": "RdYlBu_r", "hm_step": 0.5, "hm_target": True, "hm_point": True}   # = widget defaults
+_HEATMAP_NUMERIC = ("htmin", "htmax", "hrmin", "hrmax", "hz")
+_BOOL_KEYS = {"hg": "hm_target", "hp": "hm_point"}      # highlight target range / mark selected point
 # Preset identity (needed because different presets can have identical numerical ranges).
 _STAGE_IDS = {"seed": "Seedlings / propagation", "veg": "Vegetative", "flow": "Flowering",
               "gen": "General horticulture", "custom": presets.CUSTOM}
@@ -64,6 +78,22 @@ def parse_params(params: Mapping[str, str]) -> dict:
         out["target_kind"] = _KIND[params["k"]]
     if params.get("ik") in _KIND:
         out["interval_kind"] = _KIND[params["ik"]]
+    if params.get("hk") in _KIND:
+        out["hm_kind"] = _KIND[params["hk"]]
+    if params.get("hcs") in _COLORSCALES:
+        out["hm_cs"] = params["hcs"]
+    if "hst" in params:
+        try:
+            step = float(params["hst"])
+        except (TypeError, ValueError):
+            step = None
+        if step is not None and math.isfinite(step):
+            match = [s for s in _CONTOUR_STEPS if abs(s - step) < 1e-9]
+            if match:
+                out["hm_step"] = match[0]
+    for q, key in _BOOL_KEYS.items():
+        if params.get(q) in ("0", "1"):
+            out[key] = params[q] == "1"
     for period, pre in _PERIODS.items():
         for suffix, (pattern, lo, hi) in _PERIOD_NUMERIC.items():
             q = pre + suffix
@@ -115,6 +145,16 @@ def build_params(state: Mapping) -> dict:
         preset = state.get(f"dn_preset_{period}")
         if preset in ids:
             p[pre + "p"] = ids[preset]
+    # Heatmap controls. Their widgets are created after this runs on a fresh session, so fall back to the
+    # control defaults (HEATMAP_DEFAULTS) until the widgets exist.
+    for q in _HEATMAP_NUMERIC:
+        key = _NUMERIC[q][0]
+        p[q] = _fmt(state.get(key, HEATMAP_DEFAULTS[key]))
+    p["hk"] = "air" if state.get("hm_kind", AIR_LABEL) == AIR_LABEL else "leaf"
+    p["hcs"] = state.get("hm_cs", HEATMAP_DEFAULTS["hm_cs"])
+    p["hst"] = _fmt(state.get("hm_step", HEATMAP_DEFAULTS["hm_step"]))
+    for q, key in _BOOL_KEYS.items():
+        p[q] = "1" if state.get(key, HEATMAP_DEFAULTS[key]) else "0"
     return p
 
 

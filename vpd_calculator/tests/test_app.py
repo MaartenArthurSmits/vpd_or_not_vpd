@@ -684,3 +684,128 @@ def test_share_explanation_mentions_day_night_settings():
     at = new_app().run()
     text = " ".join(c.value for c in at.caption)
     assert "independently for day and night" in text and "preset" in text
+
+
+# ---- heatmap settings in shareable links -----------------------------------------------------------
+HEATMAP_LINK = {"hk": "leaf", "htmin": "12", "htmax": "38", "hrmin": "25", "hrmax": "95", "hz": "3.5",
+                "hcs": "Viridis", "hst": "0.2", "hg": "0", "hp": "0"}
+
+
+def heatmap_spec(at):
+    import json
+    charts = [c for c in at.get("plotly_chart") if "temperature and relative humidity" in c.proto.spec]
+    assert len(charts) == 1
+    return json.loads(charts[0].proto.spec)
+
+
+def test_heatmap_link_restores_controls_and_chart_alongside_other_settings():
+    params = ACCEPTANCE | {"t": "25", "rh": "40", "lo": "0.9", "hi": "1.3", "ik": "leaf", "off": "-2"} | HEATMAP_LINK
+    at = app_with_params(params)
+    assert not at.exception
+    # heatmap controls
+    assert at.radio(key="hm_kind").value == share.LEAF_LABEL
+    assert (at.number_input(key="hm_tmin").value, at.number_input(key="hm_tmax").value) == (12.0, 38.0)
+    assert (at.number_input(key="hm_rhmin").value, at.number_input(key="hm_rhmax").value) == (25.0, 95.0)
+    assert at.number_input(key="hm_zmax").value == 3.5
+    assert at.selectbox(key="hm_cs").value == "Viridis" and at.selectbox(key="hm_step").value == 0.2
+    assert at.checkbox(key="hm_target").value is False and at.checkbox(key="hm_point").value is False
+    # the chart follows those settings
+    spec = heatmap_spec(at)
+    layout = spec["layout"]
+    assert layout["xaxis"]["range"] == [12, 38] and layout["yaxis"]["range"] == [25, 95]
+    assert "Leaf VPD" in layout["title"]["text"]
+    heat = spec["data"][0]
+    assert heat["zmax"] == 3.5 and heat["colorbar"]["title"]["text"] == "Leaf VPD (kPa)"
+    assert heat["colorscale"][0][1] == "#440154"                                   # Viridis
+    assert [d["type"] for d in spec["data"]] == ["heatmap", "contour"]             # no target layers, no point
+    assert spec["data"][1]["contours"]["size"] == 0.2
+    # calculator and day/night settings are restored as well
+    s = at.session_state
+    assert (s["t_air"], s["rh"], s["vpd_lo"], s["vpd_hi"], s["calc_offset"]) == (25.0, 40.0, 0.9, 1.3, -2.0)
+    assert s["interval_kind"] == share.LEAF_LABEL
+    assert (s["dn_t_day"], s["dn_off_day"], s["dn_kind_day"], s["dn_preset_day"]) == (
+        33.0, -2.0, share.LEAF_LABEL, "Vegetative")
+    assert (s["dn_t_night"], s["dn_hi_night"], s["dn_kind_night"]) == (17.0, 1.0, share.AIR_LABEL)
+
+
+def test_heatmap_toggles_on_restore_target_and_point_layers():
+    at = app_with_params({"hg": "1", "hp": "1", "ik": "leaf", "lo": "0.8", "hi": "1.2", "hk": "air"})
+    kinds = [d["type"] for d in heatmap_spec(at)["data"]]
+    assert kinds == ["heatmap", "heatmap", "contour", "contour", "scatter"]
+
+
+def test_app_url_round_trip_of_heatmap_settings_into_a_fresh_session():
+    at = new_app().run()
+    at.radio(key="hm_kind").set_value(share.LEAF_LABEL).run()
+    at.number_input(key="hm_tmin").set_value(15.0).run()
+    at.number_input(key="hm_rhmax").set_value(90.0).run()
+    at.selectbox(key="hm_cs").set_value("Turbo").run()
+    at.selectbox(key="hm_step").set_value(0.1).run()
+    at.number_input(key="hm_zmax").set_value(4.0).run()
+    at.checkbox(key="hm_point").set_value(False).run()
+    set_num(at, "t_air", 27.0)
+    set_num(at, "dn_t_night", 15.5)
+    link = {k: qp(at, k) for k in at.query_params}
+    assert {"hk", "htmin", "htmax", "hrmin", "hrmax", "hz", "hcs", "hst", "hg", "hp"} <= set(link)
+    fresh = app_with_params(link)
+    assert not fresh.exception
+    for key in ("hm_kind", "hm_tmin", "hm_tmax", "hm_rhmin", "hm_rhmax", "hm_cs", "hm_step", "hm_zmax",
+                "hm_target", "hm_point", "t_air", "dn_t_night"):
+        assert fresh.session_state[key] == at.session_state[key], key
+    assert heatmap_spec(fresh)["layout"] == heatmap_spec(at)["layout"]
+
+
+def test_editing_heatmap_settings_updates_url_without_touching_other_settings():
+    at = new_app().run()
+    before = {k: qp(at, k) for k in ("t", "rh", "dt", "nt", "dlo", "nhi")}
+    at.selectbox(key="hm_cs").set_value("Plasma").run()
+    at.checkbox(key="hm_target").set_value(False).run()
+    assert qp(at, "hcs") == "Plasma" and qp(at, "hg") == "0"
+    assert {k: qp(at, k) for k in before} == before
+
+
+def test_legacy_link_keeps_heatmap_defaults():
+    at = app_with_params(ACCEPTANCE | {"t": "25"})
+    assert not at.exception
+    assert at.radio(key="hm_kind").value == share.AIR_LABEL
+    assert (at.number_input(key="hm_tmin").value, at.number_input(key="hm_tmax").value) == (10.0, 40.0)
+    assert (at.number_input(key="hm_rhmin").value, at.number_input(key="hm_rhmax").value) == (10.0, 100.0)
+    assert at.selectbox(key="hm_cs").value == "RdYlBu_r" and at.selectbox(key="hm_step").value == 0.5
+    assert at.number_input(key="hm_zmax").value == 0.0
+    assert at.checkbox(key="hm_target").value is True and at.checkbox(key="hm_point").value is True
+
+
+@pytest.mark.parametrize("bad", [
+    {"htmin": "abc", "htmax": "nan", "hrmin": "inf", "hrmax": "-5", "hz": "x"},
+    {"hk": "water", "hcs": "rainbow", "hst": "0.3", "hg": "yes", "hp": "2"},
+    {"htmin": "999", "hz": "1e999", "hrmin": "", "hst": "nan"},
+])
+def test_invalid_heatmap_link_parameters_fall_back_to_defaults_without_error(bad):
+    at = app_with_params(bad)
+    assert not at.exception
+    assert at.radio(key="hm_kind").value == share.AIR_LABEL
+    assert (at.number_input(key="hm_tmin").value, at.number_input(key="hm_tmax").value) == (10.0, 40.0)
+    assert (at.number_input(key="hm_rhmin").value, at.number_input(key="hm_rhmax").value) == (10.0, 100.0)
+    assert at.number_input(key="hm_zmax").value == 0.0
+    assert at.selectbox(key="hm_cs").value == "RdYlBu_r" and at.selectbox(key="hm_step").value == 0.5
+    assert at.checkbox(key="hm_target").value and at.checkbox(key="hm_point").value
+
+
+def test_heatmap_share_defaults_match_the_widget_defaults():
+    at = new_app().run()
+    widgets = {"hm_tmin": at.number_input, "hm_tmax": at.number_input, "hm_rhmin": at.number_input,
+               "hm_rhmax": at.number_input, "hm_zmax": at.number_input, "hm_cs": at.selectbox,
+               "hm_step": at.selectbox, "hm_target": at.checkbox, "hm_point": at.checkbox}
+    for key, default in share.HEATMAP_DEFAULTS.items():
+        assert widgets[key](key=key).value == default, key
+    assert at.radio(key="hm_kind").value == share.AIR_LABEL
+    # a fresh session already exposes the complete heatmap parameter set in the URL
+    assert {"hk", "htmin", "htmax", "hrmin", "hrmax", "hz", "hcs", "hst", "hg", "hp"} <= set(at.query_params)
+
+
+@pytest.mark.parametrize("partial", [{"htmin": "15"}, {"hz": "2.5"}, {"hcs": "Plasma", "hg": "0"}, {"hk": "leaf"}])
+def test_partial_heatmap_link_does_not_error_and_keeps_other_defaults(partial):
+    at = app_with_params(partial)
+    assert not at.exception
+    assert at.number_input(key="hm_tmax").value == 40.0 and at.number_input(key="hm_rhmin").value == 10.0
+    assert {k: qp(at, k) for k in partial} == {k: v for k, v in partial.items()}   # URL keeps the saved values

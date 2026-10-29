@@ -5,6 +5,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import plots  # noqa: E402
 import presets  # noqa: E402
 import share  # noqa: E402
 
@@ -106,3 +107,68 @@ def test_resolve_stage_keeps_identity_for_identical_ranges_and_never_changes_lim
     assert presets.resolve_stage(presets.CUSTOM, 1.0, 1.0, "day") == presets.CUSTOM
     assert presets.resolve_stage("Flowering", 0.8, 1.2, "day") == "General horticulture"  # inconsistent id
     assert presets.resolve_stage("Flowering", 0.7, 1.1, "day") == presets.CUSTOM
+
+
+# ---- heatmap settings ----------------------------------------------------------------------
+HM_STATE = DN_STATE | {
+    "hm_kind": share.LEAF_LABEL, "hm_tmin": 12.5, "hm_tmax": 38.0, "hm_rhmin": 25.0, "hm_rhmax": 95.0,
+    "hm_cs": "Viridis", "hm_zmax": 3.5, "hm_step": 0.2, "hm_target": False, "hm_point": False,
+}
+HM_KEYS = ("htmin", "htmax", "hrmin", "hrmax", "hz", "hk", "hcs", "hst", "hg", "hp")
+
+
+def test_heatmap_round_trip_alongside_calculator_and_day_night():
+    params = share.build_params(HM_STATE)
+    assert {k: params[k] for k in HM_KEYS} == {
+        "htmin": "12.5", "htmax": "38", "hrmin": "25", "hrmax": "95", "hz": "3.5", "hk": "leaf",
+        "hcs": "Viridis", "hst": "0.2", "hg": "0", "hp": "0"}
+    parsed = share.parse_params(params)
+    for k, v in HM_STATE.items():
+        if k != "calc_leaf_meas":
+            assert parsed[k] == v, k
+
+
+def test_heatmap_colorscales_match_the_app_options():
+    assert share._COLORSCALES == plots.COLORSCALES
+    for name in plots.COLORSCALES:
+        assert share.parse_params({"hcs": name}) == {"hm_cs": name}
+
+
+@pytest.mark.parametrize("step", [0.1, 0.2, 0.5, 1.0])
+@pytest.mark.parametrize("flag", [True, False])
+def test_heatmap_step_and_toggle_round_trip(step, flag):
+    parsed = share.parse_params(share.build_params(HM_STATE | {"hm_step": step, "hm_target": flag, "hm_point": not flag}))
+    assert parsed["hm_step"] == step and parsed["hm_target"] is flag and parsed["hm_point"] is (not flag)
+
+
+def test_older_links_do_not_touch_heatmap_settings():
+    assert share.parse_params({"t": "25", "dt": "30"}).keys() == {"t_air", "dn_t_day"}
+
+
+def test_build_params_before_heatmap_widgets_exist_uses_control_defaults():
+    """On a fresh session the URL is built before the heatmap widgets are created (and partial links set only some)."""
+    params = share.build_params(DN_STATE)
+    assert {k: params[k] for k in HM_KEYS} == {
+        "htmin": "10", "htmax": "40", "hrmin": "10", "hrmax": "100", "hz": "0", "hk": "air",
+        "hcs": "RdYlBu_r", "hst": "0.5", "hg": "1", "hp": "1"}
+    partial = share.build_params(DN_STATE | {"hm_tmin": 15.0})        # only one heatmap key present: no KeyError
+    assert partial["htmin"] == "15" and partial["htmax"] == "40"
+    parsed = share.parse_params(params)
+    for key, default in share.HEATMAP_DEFAULTS.items():
+        assert parsed[key] == default
+
+
+
+@pytest.mark.parametrize("bad", [
+    {"htmin": "abc"}, {"htmin": "nan"}, {"htmax": "inf"}, {"htmin": "-10.1"}, {"htmax": "60.1"},
+    {"hrmin": "-1"}, {"hrmin": "99.5"}, {"hrmax": "0.5"}, {"hrmax": "101"}, {"hz": "-1"}, {"hz": "21"},
+    {"hz": "1e999"}, {"hk": "water"}, {"hk": "AIR"}, {"hcs": "rainbow"}, {"hcs": "viridis"}, {"hcs": ""},
+    {"hst": "0.3"}, {"hst": "nan"}, {"hst": "x"}, {"hst": ""}, {"hg": "true"}, {"hg": "2"}, {"hp": ""},
+])
+def test_invalid_heatmap_parameters_are_ignored(bad):
+    assert share.parse_params(bad) == {}
+
+
+def test_heatmap_bounds_are_inclusive_and_not_clamped():
+    ok = share.parse_params({"htmin": "-10", "htmax": "60", "hrmin": "0", "hrmax": "100", "hz": "0"})
+    assert ok == {"hm_tmin": -10.0, "hm_tmax": 60.0, "hm_rhmin": 0.0, "hm_rhmax": 100.0, "hm_zmax": 0.0}
