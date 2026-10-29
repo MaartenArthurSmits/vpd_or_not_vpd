@@ -286,10 +286,10 @@ def test_mpl_zero_boundary_drawn_only_when_crossing():
     crossing = mpl_export.heatmap_mpl(10, 40, 10, 100, vpd.LEAF, -2.0, point=(T_AIR, RH))
     assert len(_mpl_zero_artists(crossing)) == 1
     assert ZERO in [t.get_text() for t in crossing.axes[0].get_legend().get_texts()]
-    assert "possible condensation" in crossing.axes[0].get_title()
+    assert "possible condensation" in crossing.get_supxlabel()
     assert mpl_export.to_bytes(crossing, "png", 80)[:4] == b"\x89PNG" and mpl_export.to_bytes(crossing, "pdf")[:5] == b"%PDF-"
     for fig in (mpl_export.heatmap_mpl(10, 40, 10, 100, vpd.LEAF, 0.0),
                 mpl_export.heatmap_mpl(10, 40, 10, 100, vpd.LEAF, 2.0),
                 mpl_export.heatmap_mpl(10, 40, 10, 100, vpd.AIR, -2.0)):
         assert _mpl_zero_artists(fig) == []
-        assert "possible condensation" not in fig.axes[0].get_title()
+        assert "possible condensation" not in fig.get_supxlabel()

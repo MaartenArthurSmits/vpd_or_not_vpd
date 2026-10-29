@@ -7,6 +7,7 @@ directly (no pyplot), so rendering is safe inside the Streamlit server.
 from __future__ import annotations
 
 import io
+import textwrap
 
 import matplotlib
 
@@ -76,18 +77,25 @@ def heatmap_mpl(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0, colorsca
                     markeredgecolor="black", markeredgewidth=1.5, linestyle="none",
                     label=f"Selected: {t:.1f} °C, {rh:.1f} %")
     if point is not None or handles:
-        ax.legend(handles=ax.get_legend_handles_labels()[0] + handles, loc="upper right",
-                  frameon=True, fontsize=9)
+        entries = ax.get_legend_handles_labels()[0] + handles
+        ax.legend(handles=entries, loc="upper center", bbox_to_anchor=(0.5, -0.14),   # below the axis label
+                  ncol=min(len(entries), 3), frameon=True, fontsize=9)
 
     ax.set_xlim(t_min, t_max)
     ax.set_ylim(rh_min, rh_max)
     ax.set_xlabel("Air temperature (°C)")
     ax.set_ylabel("Relative humidity (%)")
-    subtitle = f"leaf offset {offset:+.1f} °C; " if kind == vpd.LEAF else ""
+    ax.set_title(f"{label} (kPa) as a function of temperature and relative humidity", fontsize=12)
+    notes = []
+    if kind == vpd.LEAF:
+        sign = "−" if offset < 0 else "+"
+        notes.append(f"Leaf VPD assumes one constant leaf-air offset of {offset:+.1f} °C: "
+                     f"leaf temperature = air temperature {sign} {abs(offset):.1f} °C throughout the chart.")
     if zero_drawn:
-        subtitle += "negative leaf VPD indicates possible condensation; "
-    ax.set_title(f"{label} (kPa) as a function of temperature and relative humidity\n"
-                 f"({subtitle}saturation vapour pressure: FAO-56, Allen et al. 1998, Eq. 11)", fontsize=11)
+        notes.append("Negative leaf VPD (beyond the saturation line) indicates possible condensation.")
+    notes.append("Saturation vapour pressure: FAO-56 (Allen et al., 1998), Eq. 11.")
+    # Captions are wrapped and placed in a figure-level label, so constrained layout reserves their space.
+    fig.supxlabel("\n".join(textwrap.fill(n, width=125) for n in notes), x=0.01, ha="left", fontsize=8.5)
     return fig
 
 
