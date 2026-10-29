@@ -17,6 +17,9 @@ import numpy as np
 import pandas as pd
 
 RH_TOL = 1e-9  # floating-point tolerance for the 0-100% boundary checks
+# Absolute tolerance (kPa) for comparing a VPD with the target limits. It only absorbs floating-point
+# round-off; it is NOT a sensor accuracy and NOT a biological tolerance.
+VPD_CLASSIFY_TOL = 1e-9
 AIR = "air"
 LEAF = "leaf"
 
@@ -181,12 +184,35 @@ def rh_range_for_vpd_range(t_air: float, vpd_low: float, vpd_high: float, kind: 
 
 
 def classify_vpd(value: float, low: float, high: float) -> str:
-    """'below', 'inside' or 'above' a user-defined interval."""
-    if value < low:
+    """'below', 'inside' or 'above' a user-defined interval [low, high] (limits inclusive).
+
+    `value` and the limits are compared at full precision, with an absolute tolerance of
+    VPD_CLASSIFY_TOL at both boundaries so that floating-point noise (e.g. 1.0000000000000004 kPa
+    from a reverse calculation) still counts as inside. Works for low == high (a point target).
+    """
+    if value < low - VPD_CLASSIFY_TOL:
         return "below"
-    if value > high:
+    if value > high + VPD_CLASSIFY_TOL:
         return "above"
     return "inside"
+
+
+def is_point_target(low: float, high: float) -> bool:
+    """True when the lower and upper limits are equal, i.e. the target is a single VPD value."""
+    return low == high
+
+
+def target_label(kind: str, low: float, high: float) -> str:
+    """Legend/plot label for a target: 'Target Air VPD 1.0 kPa' or 'Target Air VPD 0.8-1.2 kPa'."""
+    name = "Air VPD" if kind == AIR else "Leaf VPD"
+    if is_point_target(low, high):
+        return f"Target {name} {low:.1f} kPa"
+    return f"Target {name} {low:.1f}-{high:.1f} kPa"
+
+
+def classify_wording(position: str) -> str:
+    """Wording for a classify_vpd() result against a single-value target."""
+    return {"below": "below target", "inside": "at target", "above": "above target"}[position]
 
 
 # --------------------------------------------------------------------------

@@ -106,3 +106,151 @@ def test_mpl_reference_figure_png():
 def test_interface_plots_use_one_decimal_hover():
     fig = plots.heatmap_figure(10, 40, 20, 100, point=(22, 60))
     assert ":.1f} kPa" in fig.data[0].hovertemplate and ":.1f} °C" in fig.data[0].hovertemplate
+
+
+# ---- Target kind is independent of the heatmap's colour kind -------------------------------------
+# Acceptance point: 22 degC, RH 60 %, leaf offset -2 degC -> air VPD 1.05757 kPa, leaf VPD 0.75192 kPa.
+T_AIR, RH, OFFSET, TARGET = 22.0, 60.0, -2.0, (0.8, 1.2)
+BOTH = [vpd.AIR, vpd.LEAF]
+
+
+def test_acceptance_point_values():
+    assert vpd.vpd_air(T_AIR, RH) == pytest.approx(1.05757, abs=1e-5)
+    assert vpd.vpd_leaf(T_AIR, RH, T_AIR + OFFSET) == pytest.approx(0.75192, abs=1e-5)
+
+
+def _cell(fig_trace, x=T_AIR, y=RH):
+    i = int(np.argmin(np.abs(np.asarray(fig_trace.y) - y)))
+    j = int(np.argmin(np.abs(np.asarray(fig_trace.x) - x)))
+    return i, j
+
+
+@pytest.mark.parametrize("hm_kind", BOTH)
+@pytest.mark.parametrize("target_kind,inside", [(vpd.AIR, True), (vpd.LEAF, False)])
+def test_plotly_target_follows_target_kind_on_both_heatmaps(hm_kind, target_kind, inside):
+    fig = plots.heatmap_figure(10, 40, 20, 100, hm_kind, OFFSET, point=(T_AIR, RH), target=TARGET,
+                               target_kind=target_kind)
+    colours, mask, target_contour = fig.data[0], fig.data[1], fig.data[3]
+    i, j = _cell(mask)
+    assert (not np.isnan(mask.z[i][j])) is inside
+    # colours still follow the heatmap's own VPD type
+    expected_colour = vpd.vpd_air(T_AIR, RH) if hm_kind == vpd.AIR else vpd.vpd_leaf(T_AIR, RH, T_AIR + OFFSET)
+    assert colours.z[i][j] == pytest.approx(expected_colour, abs=1e-9)
+    # dashed contours are drawn on the target-kind field
+    expected_target = vpd.vpd_air(T_AIR, RH) if target_kind == vpd.AIR else vpd.vpd_leaf(T_AIR, RH, T_AIR + OFFSET)
+    assert target_contour.z[i][j] == pytest.approx(expected_target, abs=1e-9)
+    assert "Air VPD" in target_contour.name if target_kind == vpd.AIR else "Leaf VPD" in target_contour.name
+
+
+@pytest.mark.parametrize("target_kind", BOTH)
+def test_plotly_target_region_is_identical_for_both_heatmap_views(target_kind):
+    figs = [plots.heatmap_figure(10, 40, 20, 100, k, OFFSET, target=TARGET, target_kind=target_kind) for k in BOTH]
+    m0, m1 = (np.asarray(f.data[1].z, dtype=float) for f in figs)
+    assert np.array_equal(np.isnan(m0), np.isnan(m1))
+    assert np.array_equal(np.asarray(figs[0].data[3].z), np.asarray(figs[1].data[3].z))
+
+
+def test_plotly_target_kind_defaults_to_heatmap_kind():
+    fig = plots.heatmap_figure(10, 40, 20, 100, vpd.LEAF, OFFSET, target=TARGET)
+    explicit = plots.heatmap_figure(10, 40, 20, 100, vpd.LEAF, OFFSET, target=TARGET, target_kind=vpd.LEAF)
+    assert np.array_equal(np.asarray(fig.data[3].z), np.asarray(explicit.data[3].z))
+
+
+def _mpl_target_artists(fig):
+    """Filled target region (white, alpha 0.35) and dashed target contours of a heatmap_mpl figure."""
+    ax = fig.axes[0]
+    filled = [c for c in ax.collections if c.get_alpha() == 0.35]
+    dashed = [c for c in ax.collections if c.get_linewidths() is not None and len(c.get_linewidths())
+              and c.get_linewidths()[0] == 2.0]
+    assert len(filled) == 1 and len(dashed) == 1
+    return filled[0], dashed[0]
+
+
+@pytest.mark.parametrize("hm_kind", BOTH)
+@pytest.mark.parametrize("target_kind,inside", [(vpd.AIR, True), (vpd.LEAF, False)])
+def test_mpl_target_follows_target_kind_on_both_heatmaps(hm_kind, target_kind, inside):
+    fig = mpl_export.heatmap_mpl(10, 40, 10, 100, hm_kind, OFFSET, point=(T_AIR, RH), target=TARGET,
+                                 target_kind=target_kind)
+    filled, _ = _mpl_target_artists(fig)
+    assert any(p.contains_point((T_AIR, RH)) for p in filled.get_paths()) is inside
+    legend_text = [t.get_text() for t in fig.axes[0].get_legend().get_texts()]
+    label = "Air VPD" if target_kind == vpd.AIR else "Leaf VPD"
+    assert any(f"Target {label} 0.8-1.2 kPa" in t for t in legend_text)
+
+
+@pytest.mark.parametrize("target_kind", BOTH)
+def test_mpl_target_geometry_is_identical_for_both_heatmap_views(target_kind):
+    arts = [_mpl_target_artists(mpl_export.heatmap_mpl(10, 40, 10, 100, k, OFFSET, target=TARGET,
+                                                       target_kind=target_kind)) for k in BOTH]
+    for a, b in zip(arts[0], arts[1]):
+        assert len(a.get_paths()) == len(b.get_paths())
+        for pa, pb in zip(a.get_paths(), b.get_paths()):
+            assert np.allclose(pa.vertices, pb.vertices)
+
+
+@pytest.mark.parametrize("target_kind", BOTH)
+def test_mpl_png_and_pdf_render_with_mixed_kinds(target_kind):
+    fig = mpl_export.heatmap_mpl(10, 40, 10, 100, vpd.AIR, OFFSET, point=(T_AIR, RH), target=TARGET,
+                                 target_kind=target_kind)
+    assert mpl_export.to_bytes(fig, "png", 100)[:8] == b"\x89PNG\r\n\x1a\n"
+    assert mpl_export.to_bytes(fig, "pdf")[:5] == b"%PDF-"
+
+
+# ---- single-value targets (lower limit == upper limit): one contour, no shaded band ---------------
+POINT = (1.0, 1.0)
+
+
+def test_target_label_helper_single_value_and_range():
+    assert vpd.target_label(vpd.AIR, 1.0, 1.0) == "Target Air VPD 1.0 kPa"
+    assert vpd.target_label(vpd.LEAF, 1.0, 1.0) == "Target Leaf VPD 1.0 kPa"
+    assert vpd.target_label(vpd.AIR, 0.8, 1.2) == "Target Air VPD 0.8-1.2 kPa"
+    assert vpd.is_point_target(1.0, 1.0) and not vpd.is_point_target(0.8, 1.2)
+    assert [vpd.classify_wording(p) for p in ("below", "inside", "above")] == [
+        "below target", "at target", "above target"]
+
+
+@pytest.mark.parametrize("target_kind,label", [(vpd.AIR, "Target Air VPD 1.0 kPa"),
+                                                (vpd.LEAF, "Target Leaf VPD 1.0 kPa")])
+def test_plotly_single_target_has_one_contour_and_no_band(target_kind, label):
+    fig = plots.heatmap_figure(10, 40, 20, 100, vpd.AIR, OFFSET, point=(T_AIR, RH), target=POINT,
+                               target_kind=target_kind)
+    assert kinds(fig) == ["Heatmap", "Contour", "Contour", "Scatter"]      # no shaded overlay heatmap
+    contour = fig.data[2]
+    assert contour.contours.start == contour.contours.end == 1.0
+    assert contour.name == label and contour.showlegend
+    assert all("(overlay)" not in (t.name or "") for t in fig.data)
+
+
+def test_plotly_range_target_still_has_overlay_and_range_label():
+    fig = plots.heatmap_figure(10, 40, 20, 100, vpd.AIR, OFFSET, target=TARGET, target_kind=vpd.AIR)
+    assert kinds(fig) == ["Heatmap", "Heatmap", "Contour", "Contour"]
+    assert fig.data[1].name == "Target Air VPD 0.8-1.2 kPa (overlay)"
+    assert fig.data[3].name == "Target Air VPD 0.8-1.2 kPa"
+
+
+def test_plotly_single_target_contour_is_drawn_at_the_value():
+    fig = plots.heatmap_figure(10, 40, 20, 100, vpd.LEAF, OFFSET, target=POINT, target_kind=vpd.AIR)
+    z = np.asarray(fig.data[2].z)
+    assert z.min() < 1.0 < z.max()                       # the 1.0 kPa level crosses the grid
+
+
+@pytest.mark.parametrize("target_kind,label", [(vpd.AIR, "Target Air VPD 1.0 kPa"),
+                                                (vpd.LEAF, "Target Leaf VPD 1.0 kPa")])
+def test_mpl_single_target_is_one_contour_without_filled_band(target_kind, label):
+    fig = mpl_export.heatmap_mpl(10, 40, 10, 100, vpd.AIR, OFFSET, point=(T_AIR, RH), target=POINT,
+                                 target_kind=target_kind)
+    ax = fig.axes[0]
+    assert not [c for c in ax.collections if c.get_alpha() == 0.35]          # no shaded band
+    dashed = [c for c in ax.collections if len(c.get_linewidths()) and c.get_linewidths()[0] == 2.0]
+    assert len(dashed) == 1 and list(dashed[0].levels) == [1.0]                # exactly one level
+    assert label in [t.get_text() for t in ax.get_legend().get_texts()]
+    assert mpl_export.to_bytes(fig, "png", 100)[:8] == b"\x89PNG\r\n\x1a\n"
+    assert mpl_export.to_bytes(fig, "pdf")[:5] == b"%PDF-"
+
+
+def test_vpd_vs_rh_single_target_is_a_line_not_a_band():
+    rr = vpd.rh_range_for_vpd_range(22, 1.0, 1.0)
+    assert rr["rh_min"] == rr["rh_max"]
+    fig = plots.vpd_vs_rh_figure(22, 0, vpd.AIR, rh_range=rr, point_rh=60)
+    assert [s.type for s in fig.layout.shapes].count("rect") == 0
+    assert any(a.text == "target RH" for a in fig.layout.annotations)

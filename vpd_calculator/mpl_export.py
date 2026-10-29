@@ -14,6 +14,7 @@ matplotlib.use("Agg")
 
 import numpy as np  # noqa: E402
 from matplotlib.figure import Figure  # noqa: E402
+from matplotlib.lines import Line2D  # noqa: E402
 
 import vpd  # noqa: E402
 
@@ -25,14 +26,19 @@ CMAPS = {  # app colour-scale names -> Matplotlib colormaps
 
 def heatmap_mpl(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0, colorscale="RdYlBu_r",
                 contour_step=0.5, z_max=None, point=None, target=None,
-                figsize=(10.0, 6.5)) -> Figure:
-    """Temperature x RH heatmap with labelled contours, target range and selected point."""
+                figsize=(10.0, 6.5), target_kind=None) -> Figure:
+    """Temperature x RH heatmap with labelled contours, target range and selected point.
+
+    Colours follow `kind`; the target shading/contours follow `target_kind` (default: `kind`).
+    """
     temps = np.arange(t_min, t_max + 1e-9, 0.25)
     rhs = np.arange(rh_min, rh_max + 1e-9, 0.5)
     z = vpd.vpd_matrix(temps, rhs, kind, offset)
     label = "Air VPD" if kind == vpd.AIR else "Leaf VPD"
     vmin = float(np.floor(z.min() * 2) / 2) if z.min() < 0 else 0.0
     vmax = float(z_max) if z_max else float(z.max())
+    tkind = kind if target_kind is None else target_kind
+    zt = z if tkind == kind else vpd.vpd_matrix(temps, rhs, tkind, offset)
 
     fig = Figure(figsize=figsize, constrained_layout=True)
     ax = fig.subplots()
@@ -48,13 +54,16 @@ def heatmap_mpl(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0, colorsca
         cs = ax.contour(temps, rhs, z, levels=levels, colors="black", linewidths=0.6, alpha=0.6)
         ax.clabel(cs, fmt="%.1f", fontsize=8)
 
+    handles = []
     if target is not None:
         lo, hi = target
         if hi > lo:
-            ax.contourf(temps, rhs, z, levels=[lo, hi], colors=["white"], alpha=0.35)
+            ax.contourf(temps, rhs, zt, levels=[lo, hi], colors=["white"], alpha=0.35)
         tl = sorted({float(lo), float(hi)})
-        ct = ax.contour(temps, rhs, z, levels=tl, colors="black", linewidths=2.0, linestyles="--")
+        ct = ax.contour(temps, rhs, zt, levels=tl, colors="black", linewidths=2.0, linestyles="--")
         ax.clabel(ct, fmt="%.1f", fontsize=9)
+        handles.append(Line2D([], [], color="black", linestyle="--", linewidth=2.0,
+                              label=vpd.target_label(tkind, lo, hi)))
 
     if point is not None:
         t, rh = point
@@ -62,7 +71,9 @@ def heatmap_mpl(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0, colorsca
             ax.plot([t], [rh], marker="*", markersize=16, markerfacecolor="white",
                     markeredgecolor="black", markeredgewidth=1.5, linestyle="none",
                     label=f"Selected: {t:.1f} °C, {rh:.1f} %")
-            ax.legend(loc="upper right", frameon=True, fontsize=9)
+    if point is not None or handles:
+        ax.legend(handles=ax.get_legend_handles_labels()[0] + handles, loc="upper right",
+                  frameon=True, fontsize=9)
 
     ax.set_xlim(t_min, t_max)
     ax.set_ylim(rh_min, rh_max)

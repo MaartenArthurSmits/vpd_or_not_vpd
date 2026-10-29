@@ -10,6 +10,8 @@ import math
 from typing import Mapping
 from urllib.parse import urlencode
 
+import presets
+
 APP_URL = "https://vpd-or-not-vpd.streamlit.app/"
 
 MODE_A = "Calculate VPD (from temperature and RH)"
@@ -30,6 +32,20 @@ _NUMERIC = {
 }
 _KIND = {"air": AIR_LABEL, "leaf": LEAF_LABEL}
 
+# Day/night settings: period -> query-key prefix. Per period the keys are
+#   <p>t air temperature, <p>off leaf offset, <p>lo / <p>hi VPD limits, <p>k air|leaf, <p>p preset id.
+# Bounds equal the interface input bounds; invalid values are ignored (not clamped), as for the main settings.
+_PERIODS = {"day": "d", "night": "n"}
+_PERIOD_NUMERIC = {  # query suffix -> (session-state key pattern, min, max)
+    "t": ("dn_t_{p}", -10.0, 60.0),
+    "off": ("dn_off_{p}", -10.0, 10.0),
+    "lo": ("dn_lo_{p}", 0.0, 10.0),
+    "hi": ("dn_hi_{p}", 0.0, 10.0),
+}
+# Preset identity (needed because different presets can have identical numerical ranges).
+_STAGE_IDS = {"seed": "Seedlings / propagation", "veg": "Vegetative", "flow": "Flowering",
+              "gen": "General horticulture", "custom": presets.CUSTOM}
+
 
 def parse_params(params: Mapping[str, str]) -> dict:
     """Convert query parameters to session-state updates."""
@@ -48,6 +64,20 @@ def parse_params(params: Mapping[str, str]) -> dict:
         out["target_kind"] = _KIND[params["k"]]
     if params.get("ik") in _KIND:
         out["interval_kind"] = _KIND[params["ik"]]
+    for period, pre in _PERIODS.items():
+        for suffix, (pattern, lo, hi) in _PERIOD_NUMERIC.items():
+            q = pre + suffix
+            if q in params:
+                try:
+                    v = float(params[q])
+                except (TypeError, ValueError):
+                    continue
+                if math.isfinite(v) and lo <= v <= hi:
+                    out[pattern.format(p=period)] = v
+        if params.get(pre + "k") in _KIND:
+            out[f"dn_kind_{period}"] = _KIND[params[pre + "k"]]
+        if params.get(pre + "p") in _STAGE_IDS:
+            out[f"dn_preset_{period}"] = _STAGE_IDS[params[pre + "p"]]   # identity only; limits are separate
     if "calc_leaf_meas" in out:
         out["calc_leaf_method"] = MEASURED_METHOD
     elif "calc_offset" in out:
@@ -75,6 +105,16 @@ def build_params(state: Mapping) -> dict:
         p["lm"] = _fmt(state["calc_leaf_meas"])
     else:
         p["off"] = _fmt(state["calc_offset"])
+    ids = {name: i for i, name in _STAGE_IDS.items()}
+    for period, pre in _PERIODS.items():
+        if f"dn_t_{period}" not in state:        # day/night settings not initialised (e.g. unit tests)
+            continue
+        for suffix, (pattern, _lo, _hi) in _PERIOD_NUMERIC.items():
+            p[pre + suffix] = _fmt(state[pattern.format(p=period)])
+        p[pre + "k"] = "air" if state.get(f"dn_kind_{period}", AIR_LABEL) == AIR_LABEL else "leaf"
+        preset = state.get(f"dn_preset_{period}")
+        if preset in ids:
+            p[pre + "p"] = ids[preset]
     return p
 
 

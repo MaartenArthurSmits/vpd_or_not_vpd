@@ -151,3 +151,54 @@ def test_r_script_ggplot2_heatmap_runs_and_exports_png_and_pdf(tmp_path, heatmap
     assert struct.unpack(">II", png[16:24]) == (3000, 1950)           # 10 x 6.5 in at 300 dpi
     assert pdf[:5] == b"%PDF-"
     assert parse_r_output(res.stdout)["vpd_air"] == pytest.approx(vpd.vpd_air(22, 60), abs=1e-6)
+
+
+# ---- R script: target follows the Calculator's air/leaf setting, not the heatmap's colour kind ----
+@pytest.mark.parametrize("hm_kind", [vpd.AIR, vpd.LEAF])
+@pytest.mark.parametrize("target_kind", [vpd.AIR, vpd.LEAF])
+def test_r_script_target_uses_its_own_kind(hm_kind, target_kind):
+    h = HEATMAP | {"kind": hm_kind, "target_kind": target_kind}
+    s = rscript.build_r_script(True, 22.0, 60.0, 1.0, vpd.AIR, 20.0, (0.8, 1.2), target_kind, heatmap=h)
+    assert f'hm_kind   <- "{hm_kind}"' in s and f'hm_target_kind <- "{target_kind}"' in s
+    assert "grid$vpd_target <- es(t_ref_target) - es(grid$temperature) * grid$rh / 100" in s
+    assert "aes(z = vpd_target), breaks = unique(c(0.8, 1.2))" in s
+    assert f"target {'Air' if target_kind == vpd.AIR else 'Leaf'} VPD 0.8-1.2 kPa" in s
+    assert "hm_offset <- -2.0" in s
+
+
+@pytest.mark.skipif(not r_has_ggplot2(), reason="Rscript or ggplot2 not installed")
+@pytest.mark.parametrize("hm_kind", [vpd.AIR, vpd.LEAF])
+@pytest.mark.parametrize("target_kind,inside", [(vpd.AIR, True), (vpd.LEAF, False)])
+def test_r_script_target_region_matches_acceptance_point(tmp_path, hm_kind, target_kind, inside):
+    h = HEATMAP | {"kind": hm_kind, "target_kind": target_kind, "colorscale": "Viridis"}
+    script = rscript.build_r_script(True, 22.0, 60.0, 1.0, vpd.AIR, 20.0, (0.8, 1.2), target_kind, heatmap=h)
+    script += ("\ncell <- grid[grid$temperature == 22 & grid$rh == 60, ]\n"
+               "cat(sprintf('target_vpd_cell: %.6f\\n', cell$vpd_target))\n"
+               "cat(sprintf('colour_vpd_cell: %.6f\\n', cell$vpd))\n")
+    path = tmp_path / "vpd_heatmap.R"
+    path.write_text(script, encoding="utf-8")
+    res = subprocess.run(["Rscript", str(path)], capture_output=True, text=True, timeout=300, cwd=tmp_path)
+    assert res.returncode == 0, res.stderr
+    out = parse_r_output(res.stdout)
+    air, leaf = vpd.vpd_air(22, 60), vpd.vpd_leaf(22, 60, 20)
+    assert out["target_vpd_cell"] == pytest.approx(air if target_kind == vpd.AIR else leaf, abs=1e-6)
+    assert out["colour_vpd_cell"] == pytest.approx(air if hm_kind == vpd.AIR else leaf, abs=1e-6)
+    assert (0.8 <= out["target_vpd_cell"] <= 1.2) is inside
+
+
+@pytest.mark.parametrize("target_kind,label", [(vpd.AIR, "target Air VPD 1.0 kPa"),
+                                                (vpd.LEAF, "target Leaf VPD 1.0 kPa")])
+def test_r_script_single_target_uses_one_contour_and_single_value_label(target_kind, label):
+    h = HEATMAP | {"kind": vpd.AIR, "target": (1.0, 1.0), "target_kind": target_kind}
+    s = rscript.build_r_script(True, 22.0, 60.0, 1.0, vpd.AIR, 20.0, (1.0, 1.0), target_kind, heatmap=h)
+    assert f'subtitle = "Dashed contour: {label}"' in s
+    assert "breaks = unique(c(1.0, 1.0))" in s                  # unique() collapses to one break
+    assert s.count('linetype = "dashed"') == 1 and "geom_polygon" not in s and "geom_tile" not in s
+    assert "# User-defined target for" in s and "target range" not in s
+
+
+def test_r_script_range_target_wording_is_unchanged():
+    h = HEATMAP | {"kind": vpd.AIR, "target_kind": vpd.AIR}
+    s = rscript.build_r_script(True, 22.0, 60.0, 1.0, vpd.AIR, 20.0, (0.8, 1.2), vpd.AIR, heatmap=h)
+    assert 'subtitle = "Dashed contours: target Air VPD 0.8-1.2 kPa"' in s
+    assert "# User-defined target range for air VPD" in s

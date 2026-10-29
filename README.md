@@ -64,7 +64,7 @@ Screenshots (desktop and mobile), downloaded files and console diagnostics go to
 `vpd_calculator/tests/artifacts/`. This folder is git-ignored; GitHub Actions uploads it as the
 `test-artifacts` artifact.
 
-See [docs/VALIDATION.md](docs/VALIDATION.md) for the scientific validation (published reference values, tolerances, limitations)
+See [docs/VALIDATION.md](docs/VALIDATION.md) for the scientific validation (published table values, calculated benchmarks, tolerances, limitations)
 and [vpd_calculator/README.md](vpd_calculator/README.md) for project layout.
 
 ## Method and sources

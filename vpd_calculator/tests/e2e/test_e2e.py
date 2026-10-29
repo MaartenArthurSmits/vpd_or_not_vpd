@@ -76,9 +76,10 @@ def test_switching_modes_reverse_calculation_and_state_preserved(page):
     expected = f"{vpd.rh_for_air_vpd(30, 1.0):.1f} %"
     metric(page, "Required relative humidity").get_by_text(expected).wait_for(timeout=TIMEOUT)
     page.get_by_text(share.MODE_A, exact=True).click()
-    page.get_by_text("Calculation mode").first.wait_for()
+    expected = f"{vpd.vpd_air(30, 60):.1f} kPa"
+    metric(page, "Air VPD").get_by_text(expected).wait_for(timeout=TIMEOUT)  # rerun for mode A done
     assert num(page, "Air temperature (°C)").input_value().startswith("30")
-    assert f"{vpd.vpd_air(30, 60):.1f} kPa" in metric(page, "Air VPD").inner_text()
+    assert expected in metric(page, "Air VPD").inner_text()
 
 
 def test_unattainable_target_message(page):

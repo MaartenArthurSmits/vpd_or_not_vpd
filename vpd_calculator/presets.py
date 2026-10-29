@@ -75,6 +75,22 @@ def match_stage(low: float, high: float, period: str = "day") -> str:
     return CUSTOM
 
 
+def resolve_stage(candidate, low: float, high: float, period: str = "day") -> str:
+    """Preset to show for restored settings.
+
+    A saved preset identity is kept when it is 'Custom' or when its range for `period` equals (low, high)
+    (this preserves which of several identical-range presets was selected). Otherwise the preset is
+    derived from the limits. The limits themselves are never changed.
+    """
+    if candidate == CUSTOM:
+        return CUSTOM
+    if candidate in GROWTH_STAGES:
+        a, b = GROWTH_STAGES[candidate][period]
+        if abs(a - low) < 1e-9 and abs(b - high) < 1e-9:
+            return candidate
+    return match_stage(low, high, period)
+
+
 def match_offset_preset(offset: float) -> str:
     for v, label in LEAF_OFFSET_LABELS.items():
         if abs(v - offset) < 1e-9:

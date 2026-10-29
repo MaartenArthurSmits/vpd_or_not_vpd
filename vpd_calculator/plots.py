@@ -14,11 +14,13 @@ COLORSCALES = ["RdYlBu_r", "Viridis", "Turbo", "Cividis", "Plasma", "YlGnBu", "S
 def heatmap_figure(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0,
                    colorscale="RdYlBu_r", contour_step=0.5, z_max=None,
                    point=None, target=None, template=None,
-                   width=None, height=650) -> go.Figure:
+                   width=None, height=650, target_kind=None) -> go.Figure:
     """Temperature x RH heatmap with labelled contours.
 
     point  : (t_air, rh) selected state or None
     target : (vpd_low, vpd_high) user-defined interval or None
+    target_kind : VPD type the target interval refers to (default: same as `kind`). The colours
+                  follow `kind`; the target shading and dashed contours follow `target_kind`.
     """
     temps = np.arange(t_min, t_max + 1e-9, 0.25)
     rhs = np.arange(rh_min, rh_max + 1e-9, 0.5)
@@ -26,6 +28,8 @@ def heatmap_figure(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0,
     label = "Air VPD" if kind == vpd.AIR else "Leaf VPD"
     zmin = float(np.floor(z.min() * 2) / 2) if z.min() < 0 else 0.0
     zmax = float(z_max) if z_max else float(z.max())
+    tkind = kind if target_kind is None else target_kind
+    zt = z if tkind == kind else vpd.vpd_matrix(temps, rhs, tkind, offset)
 
     fig = go.Figure()
     fig.add_trace(go.Heatmap(
@@ -36,11 +40,12 @@ def heatmap_figure(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0,
         name=label,
     ))
 
-    if target is not None:
+    if target is not None and not vpd.is_point_target(*target):     # a single value has no band to shade
         lo, hi = target
-        mask = np.where((z >= lo) & (z <= hi), 1.0, np.nan)
+        mask = np.where((zt >= lo) & (zt <= hi), 1.0, np.nan)
         fig.add_trace(go.Heatmap(
             z=mask, x=temps, y=rhs, zmin=0, zmax=1, showscale=False, hoverinfo="skip",
+            name=f"{vpd.target_label(tkind, lo, hi)} (overlay)",
             colorscale=[[0, "rgba(255,255,255,0.45)"], [1, "rgba(255,255,255,0.45)"]],
         ))
 
@@ -58,11 +63,12 @@ def heatmap_figure(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0,
     if target is not None:
         lo, hi = target
         fig.add_trace(go.Contour(
-            z=z, x=temps, y=rhs, showscale=False, hoverinfo="skip",
+            z=zt, x=temps, y=rhs, showscale=False, hoverinfo="skip",
             contours=dict(coloring="lines", showlabels=True, start=lo, end=hi,
-                          size=max(hi - lo, 1e-6), labelformat=".1f",
+                          size=max(hi - lo, 1e-6), labelformat=".1f",   # start == end: one contour
                           labelfont=dict(size=12, color="black")),
-            line=dict(width=3, dash="dash"), colorscale=[[0, "black"], [1, "black"]], name="Target VPD",
+            line=dict(width=3, dash="dash"), colorscale=[[0, "black"], [1, "black"]],
+            name=vpd.target_label(tkind, lo, hi), showlegend=True,
         ))
 
     if point is not None:
@@ -98,9 +104,13 @@ def vpd_vs_rh_figure(t_air, offset, kind, interval=None, rh_range=None, point_rh
                              line=dict(dash="dash"),
                              hovertemplate="RH %{x:.1f} %<br>%{y:.1f} kPa<extra>Leaf VPD</extra>"))
     if rh_range and rh_range.get("attainable"):
-        fig.add_vrect(x0=rh_range["rh_min"], x1=rh_range["rh_max"], opacity=0.2,
-                      line_width=0, fillcolor="green",
-                      annotation_text="target RH range", annotation_position="top left")
+        if rh_range["rh_min"] == rh_range["rh_max"]:        # single-value target: one line, no band
+            fig.add_vline(x=rh_range["rh_min"], line_width=2, line_dash="dash", line_color="green",
+                          annotation_text="target RH", annotation_position="top left")
+        else:
+            fig.add_vrect(x0=rh_range["rh_min"], x1=rh_range["rh_max"], opacity=0.2,
+                          line_width=0, fillcolor="green",
+                          annotation_text="target RH range", annotation_position="top left")
     if point_rh is not None:
         y = (vpd.vpd_air(t_air, point_rh) if kind == vpd.AIR
              else vpd.vpd_leaf(t_air, point_rh, t_air + offset))
