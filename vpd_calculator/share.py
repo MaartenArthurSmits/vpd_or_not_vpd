@@ -159,6 +159,52 @@ def build_params(state: Mapping) -> dict:
     return p
 
 
+# Every query-parameter name parse_params understands (derived from the tables above).
+RECOGNIZED_PARAMS = (
+    set(_NUMERIC) | {"m", "k", "ik", "hk", "hcs", "hst", "hg", "hp"}
+    | {pre + suffix for pre in _PERIODS.values() for suffix in (*_PERIOD_NUMERIC, "k", "p")}
+)
+
+
+def validate_setup(raw) -> tuple[dict | None, str | None]:
+    """Strictly validate a setup file (bytes or str). Returns (parameters, None) or (None, error message).
+
+    Unlike links, an invalid value for a recognized parameter is an error (nothing is applied). Unknown
+    parameter keys are ignored. The returned parameters only contain recognized keys, as strings.
+    """
+    try:
+        text = raw.decode("utf-8-sig") if isinstance(raw, (bytes, bytearray)) else raw
+        doc = json.loads(text)
+    except (UnicodeDecodeError, ValueError) as exc:
+        return None, f"The file is not valid JSON ({exc.__class__.__name__}: {str(exc)[:80]})."
+    if not isinstance(doc, dict):
+        return None, "The file is not a VPD calculator setup (the top level must be a JSON object)."
+    if doc.get("format") != SETUP_FORMAT:
+        return None, f"Unsupported file format: expected \"{SETUP_FORMAT}\"."
+    version = doc.get("schema_version")
+    if isinstance(version, bool) or version != SETUP_SCHEMA_VERSION:
+        return None, f"Unsupported schema_version: this app reads version {SETUP_SCHEMA_VERSION}."
+    params = doc.get("parameters")
+    if not isinstance(params, dict):
+        return None, "The setup has no \"parameters\" object."
+    clean: dict = {}
+    problems = []
+    for key, value in params.items():
+        if key not in RECOGNIZED_PARAMS:
+            continue                                            # unknown keys are ignored
+        if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+            problems.append(key)
+            continue
+        text_value = value if isinstance(value, str) else format(value, "g")
+        if not parse_params({key: text_value}):
+            problems.append(key)
+            continue
+        clean[key] = text_value
+    if problems:
+        return None, "Invalid value for: " + ", ".join(sorted(problems)) + ". Nothing was changed."
+    return clean, None
+
+
 SETUP_FORMAT = "vpd-calculator-setup"
 SETUP_SCHEMA_VERSION = 1
 SETUP_FILENAME = "vpd-setup.json"

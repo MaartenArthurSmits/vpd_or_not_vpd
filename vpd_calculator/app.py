@@ -62,17 +62,52 @@ DEFAULTS = {
 for k, v in DEFAULTS.items():
     st.session_state.setdefault(k, v)
 
-# Settings from a shared link are applied once, at the start of the session.
-if "_share_loaded" not in st.session_state:
-    st.session_state.update(share.parse_params(st.query_params.to_dict()))
+# Every shareable setting with its default (used when a setup file omits a setting).
+CHOICE_DEFAULTS = {
+    "mode": share.MODE_A, "target_kind": share.AIR_LABEL, "interval_kind": share.AIR_LABEL,
+    "calc_leaf_method": share.OFFSET_METHOD, "dn_kind_day": share.AIR_LABEL, "dn_kind_night": share.AIR_LABEL,
+    "hm_kind": share.AIR_LABEL,
+}
+SETTING_DEFAULTS = DEFAULTS | share.HEATMAP_DEFAULTS | CHOICE_DEFAULTS
+
+
+def derive_preset_state():
+    """Preset selectors follow the (already restored) numerical settings; saved identities are kept."""
     st.session_state["vpd_preset"] = presets.match_stage(st.session_state["vpd_lo"], st.session_state["vpd_hi"])
     st.session_state["calc_offset_preset"] = presets.match_offset_preset(st.session_state["calc_offset"])
     for _p in ("day", "night"):
         st.session_state[f"dn_preset_{_p}"] = presets.resolve_stage(
-            st.session_state.get(f"dn_preset_{_p}"),          # saved identity from the link, if any
+            st.session_state.get(f"dn_preset_{_p}"),          # saved identity from the link/setup, if any
             st.session_state[f"dn_lo_{_p}"], st.session_state[f"dn_hi_{_p}"], _p)
         st.session_state[f"dn_offset_preset_{_p}"] = presets.match_offset_preset(st.session_state[f"dn_off_{_p}"])
+
+
+# Settings from a shared link are applied once, at the start of the session.
+if "_share_loaded" not in st.session_state:
+    st.session_state.update(share.parse_params(st.query_params.to_dict()))
+    derive_preset_state()
     st.session_state["_share_loaded"] = True
+
+
+def apply_setup():
+    """'Apply setup' callback. Runs before the script reruns, so widget-bound keys may be changed safely.
+
+    The whole file is validated first; on any problem nothing is changed.
+    """
+    upload = st.session_state.get("setup_upload")
+    if upload is None:
+        st.session_state["_setup_status"] = ("error", "Choose a setup file first. Nothing was changed.")
+        return
+    params, error = share.validate_setup(upload.getvalue())
+    if error:
+        st.session_state["_setup_status"] = ("error", f"Setup not applied: {error}")
+        return
+    for _p in ("day", "night"):
+        st.session_state.pop(f"dn_preset_{_p}", None)         # saved identity comes only from the file
+    st.session_state.update(SETTING_DEFAULTS)                 # settings missing from the file use the defaults
+    st.session_state.update(share.parse_params(params))
+    derive_preset_state()
+    st.session_state["_setup_status"] = ("ok", f"Setup \"{upload.name}\" applied.")
 
 
 def linked(label, key, lo, hi, step, fmt="%.1f", num_min=None, num_max=None, help=None, after=None):
@@ -393,6 +428,15 @@ Methods & References for sources and limitations.
                            share.SETUP_FILENAME, "application/json", key="dl_setup_json")
         st.caption("The JSON file records the calculation and heatmap settings (the same settings as the link), "
                    "not results, images or other session data.")
+        st.file_uploader("Load setup (JSON)", type=["json"], key="setup_upload",
+                         help="Choosing a file does not change anything until you press Apply setup.")
+        st.button("Apply setup", key="setup_apply", on_click=apply_setup,
+                  disabled=st.session_state.get("setup_upload") is None)
+        st.caption("Applying a setup replaces the calculator, day/night and heatmap settings. Settings missing "
+                   "from the file return to their defaults; an invalid file changes nothing.")
+        _status = st.session_state.pop("_setup_status", None)
+        if _status:
+            (st.success if _status[0] == "ok" else st.error)(_status[1])
 
 # ==========================================================================
 # Heatmap

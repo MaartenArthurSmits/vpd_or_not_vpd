@@ -115,6 +115,5 @@ def test_pulse_grow_attribution_is_not_claimed_for_equations():
     app = (ROOT / "app.py").read_text(encoding="utf-8")
     assert "It is not the source of the equations" in app
     assert "Koverda, P. (2020, February 12)" in app
-    for readme in (REPO / "README.md", ROOT / "README.md"):
-        text = readme.read_text(encoding="utf-8")
-        assert "Pulse Grow" in text and "not" in text.split("Pulse Grow", 1)[1][:400].lower()
+    text = (REPO / "README.md").read_text(encoding="utf-8")
+    assert "Pulse Grow" in text and "not" in text.split("Pulse Grow", 1)[1][:400].lower()

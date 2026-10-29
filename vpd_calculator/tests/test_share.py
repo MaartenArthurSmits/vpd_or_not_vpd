@@ -189,3 +189,53 @@ def test_setup_document_contains_no_session_internals():
     state = HM_STATE | {"png": ("sig", b"\x89PNG"), "val_png": ("sig", b"x"), "_share_loaded": True}
     text = share.setup_json(state)
     assert "png" not in text.lower() and "_share_loaded" not in text and "sig" not in text
+
+
+# ---- strict validation of setup files ---------------------------------------------------------------
+def setup_bytes(params, **doc):
+    import json
+    return json.dumps({"format": "vpd-calculator-setup", "schema_version": 1, "parameters": params} | doc).encode()
+
+
+def test_validate_setup_accepts_exported_document_and_returns_share_parameters():
+    params, error = share.validate_setup(share.setup_json(HM_STATE))
+    assert error is None and params == share.build_params(HM_STATE)
+    assert set(params) <= share.RECOGNIZED_PARAMS
+
+
+def test_every_exported_parameter_is_recognized_and_valid():
+    assert set(share.build_params(HM_STATE | {"calc_leaf_method": share.MEASURED_METHOD})) <= share.RECOGNIZED_PARAMS
+    for key, value in share.build_params(HM_STATE).items():
+        assert share.parse_params({key: value}), key
+
+
+def test_validate_setup_ignores_unknown_keys_and_accepts_json_numbers():
+    params, error = share.validate_setup(setup_bytes({"t": 25, "rh": 40.5, "hg": 0, "future_setting": "x", "zz": [1]}))
+    assert error is None and params == {"t": "25", "rh": "40.5", "hg": "0"}
+
+
+@pytest.mark.parametrize("raw,fragment", [
+    (b"{not json", "not valid JSON"),
+    (b"\xff\xfe\x00", "not valid JSON"),
+    (b"", "not valid JSON"),
+    (b"[1, 2]", "top level"),
+    (b"\"text\"", "top level"),
+    (setup_bytes({}, format="something-else"), "format"),
+    (b'{"schema_version": 1, "parameters": {}}', "format"),
+    (setup_bytes({}, schema_version=2), "schema_version"),
+    (setup_bytes({}, schema_version="1"), "schema_version"),
+    (setup_bytes({}, schema_version=True), "schema_version"),
+    (b'{"format": "vpd-calculator-setup", "schema_version": 1}', "parameters"),
+    (setup_bytes([]), "parameters"),
+    (setup_bytes({"t": "999"}), "t"),
+    (setup_bytes({"t": "abc", "rh": "50"}), "t"),
+    (setup_bytes({"t": "nan"}), "t"),
+    (setup_bytes({"hk": "water"}), "hk"),
+    (setup_bytes({"hk": ["air"]}), "hk"),
+    (setup_bytes({"hg": True}), "hg"),
+    (setup_bytes({"dk": None}), "dk"),
+    (setup_bytes({"hcs": "rainbow", "dp": "nope"}), "dp"),
+])
+def test_validate_setup_rejects_bad_files_with_a_clear_message(raw, fragment):
+    params, error = share.validate_setup(raw)
+    assert params is None and error and fragment in error

@@ -865,3 +865,140 @@ def test_setup_json_reflects_edits_made_after_a_previous_run(monkeypatch):
     assert (first["t"], first["nt"], first["hcs"]) == ("22", "17", "RdYlBu_r")
     assert (second["t"], second["nt"], second["hcs"]) == ("29", "14", "Cividis")
     assert second == share.build_params(at.session_state)
+
+
+# ---- setup (JSON) import ---------------------------------------------------------------------------
+def upload_setup(at, content, name="vpd-setup.json"):
+    if isinstance(content, str):
+        content = content.encode("utf-8")
+    at.file_uploader(key="setup_upload").set_value((name, content, "application/json")).run()
+    assert not at.exception
+    return at
+
+
+def apply_setup_click(at):
+    at.button(key="setup_apply").click().run()
+    assert not at.exception
+    return at
+
+
+SETUP_LINK = ACCEPTANCE | {"t": "25", "rh": "40", "lo": "0.9", "hi": "1.3", "ik": "leaf", "off": "-2"} | HEATMAP_LINK
+
+
+def saved_setup(monkeypatch, params=SETUP_LINK):
+    calls = capture_setup_downloads(monkeypatch)
+    at = app_with_params(params)
+    return calls[-1]["data"], share.build_params(at.session_state), at
+
+
+def widget_snapshot(at):
+    s = at.session_state
+    keys = ["mode", "t_air", "rh", "target_vpd", "vpd_lo", "vpd_hi", "calc_offset", "interval_kind",
+            "dn_t_day", "dn_off_day", "dn_lo_day", "dn_hi_day", "dn_kind_day", "dn_preset_day",
+            "dn_t_night", "dn_off_night", "dn_lo_night", "dn_hi_night", "dn_kind_night", "dn_preset_night",
+            "hm_kind", "hm_tmin", "hm_tmax", "hm_rhmin", "hm_rhmax", "hm_cs", "hm_step", "hm_zmax",
+            "hm_target", "hm_point"]
+    return {k: s[k] for k in keys}
+
+
+def test_export_change_import_restores_the_saved_setup(monkeypatch):
+    data, saved_params, at = saved_setup(monkeypatch)
+    saved_state = widget_snapshot(at)
+    # change settings in all three sections
+    set_num(at, "t_air", 31.0)
+    set_num(at, "dn_t_day", 20.0)
+    at.selectbox(key="hm_cs").set_value("Greys").run()
+    at.radio(key="hm_kind").set_value(share.AIR_LABEL).run()
+    assert widget_snapshot(at) != saved_state
+    # uploading alone changes nothing
+    changed = widget_snapshot(at)
+    upload_setup(at, data)
+    assert widget_snapshot(at) == changed
+    # applying restores everything
+    apply_setup_click(at)
+    assert widget_snapshot(at) == saved_state
+    assert share.build_params(at.session_state) == saved_params
+    assert any("applied" in s.value for s in at.success)
+    # controls, results, chart and URL reflect the setup
+    assert at.number_input(key="dn_t_day__num").value == 33.0 and at.number_input(key="hm_tmin").value == 12.0
+    assert at.selectbox(key="hm_cs").value == "Viridis" and at.radio(key="hm_kind").value == share.LEAF_LABEL
+    assert metric(at, "Air VPD") == f"{vpd.vpd_air(25, 40):.1f} kPa"
+    assert metric_starting(at, "Day required RH for leaf VPD 1.0 kPa at 33.0 °C")
+    assert heatmap_spec(at)["layout"]["xaxis"]["range"] == [12, 38]
+    assert {k: qp(at, k) for k in saved_params} == saved_params
+
+
+@pytest.mark.parametrize("content", [
+    "{not json",
+    b"\xff\xfe",
+    '{"format": "other", "schema_version": 1, "parameters": {}}',
+    '{"format": "vpd-calculator-setup", "schema_version": 2, "parameters": {}}',
+    '{"format": "vpd-calculator-setup", "schema_version": 1, "parameters": {"t": "999"}}',
+    '{"format": "vpd-calculator-setup", "schema_version": 1, "parameters": {"t": "30", "hk": "water"}}',
+    '{"format": "vpd-calculator-setup", "schema_version": 1, "parameters": {"dt": "30", "hz": "1e999"}}',
+])
+def test_invalid_setup_files_leave_current_settings_untouched(content):
+    at = app_with_params(SETUP_LINK)
+    before, url_before = widget_snapshot(at), dict(at.query_params)
+    upload_setup(at, content)
+    apply_setup_click(at)
+    assert widget_snapshot(at) == before
+    assert any("Setup not applied" in e.value for e in at.error), [e.value for e in at.error]
+    assert dict(at.query_params) == url_before
+
+
+def test_apply_without_a_file_is_disabled():
+    at = new_app().run()
+    assert at.button(key="setup_apply").disabled
+
+
+def test_missing_parameters_use_the_defaults_and_unknown_keys_are_ignored():
+    at = app_with_params(SETUP_LINK)
+    upload_setup(at, '{"format": "vpd-calculator-setup", "schema_version": 1, '
+                     '"parameters": {"t": "30", "dk": "leaf", "dlo": "1", "dhi": "1", "mystery": "x"}}')
+    apply_setup_click(at)
+    s = at.session_state
+    assert (s["t_air"], s["dn_kind_day"], s["dn_lo_day"], s["dn_hi_day"]) == (30.0, share.LEAF_LABEL, 1.0, 1.0)
+    # everything not in the file is back to the default
+    assert (s["rh"], s["vpd_lo"], s["vpd_hi"], s["calc_offset"], s["interval_kind"]) == (60.0, 0.8, 1.2, 0.0, share.AIR_LABEL)
+    assert (s["dn_t_night"], s["dn_off_night"], s["dn_lo_night"], s["dn_hi_night"], s["dn_kind_night"]) == (
+        17.0, 0.0, 0.8, 1.2, share.AIR_LABEL)
+    assert (s["hm_kind"], s["hm_tmin"], s["hm_tmax"], s["hm_rhmin"], s["hm_rhmax"], s["hm_cs"], s["hm_step"],
+            s["hm_zmax"], s["hm_target"], s["hm_point"]) == (
+        share.AIR_LABEL, 10.0, 40.0, 10.0, 100.0, "RdYlBu_r", 0.5, 0.0, True, True)
+    assert s["dn_preset_day"] == "Vegetative"                       # derived from the 1.0-1.0 limits
+    assert not any("mystery" in k for k in at.query_params)
+
+
+def test_edits_after_import_persist_and_the_file_is_not_reapplied(monkeypatch):
+    data, saved_params, at = saved_setup(monkeypatch)
+    set_num(at, "t_air", 28.0)
+    upload_setup(at, data)
+    apply_setup_click(at)
+    assert at.session_state["t_air"] == 25.0
+    set_num(at, "t_air", 19.0)                                       # edit calculator
+    set_num(at, "dn_t_night", 12.0)                                  # edit day/night
+    at.selectbox(key="hm_cs").set_value("Plasma").run()              # edit heatmap
+    at.run()                                                         # plain rerun
+    s = at.session_state
+    assert (s["t_air"], s["dn_t_night"], s["hm_cs"]) == (19.0, 12.0, "Plasma")
+    assert (qp(at, "t"), qp(at, "nt"), qp(at, "hcs")) == ("19", "12", "Plasma")
+    assert s["dn_t_day"] == 33.0 and s["hm_tmin"] == 12.0           # untouched settings keep the imported values
+    assert not any("applied" in x.value for x in at.success)         # status message is shown once only
+
+
+def test_import_restores_preset_identity_and_custom_status(monkeypatch):
+    params = {"nlo": "0.8", "nhi": "1.2", "np": "veg", "dlo": "0.9", "dhi": "1.3", "dp": "custom"}
+    data, _, _ = saved_setup(monkeypatch, params)
+    at = new_app().run()
+    upload_setup(at, data)
+    apply_setup_click(at)
+    assert at.selectbox(key="dn_preset_night").value == "Vegetative"
+    assert at.selectbox(key="dn_preset_day").value == "Custom"
+    assert (at.session_state["dn_lo_day"], at.session_state["dn_hi_day"]) == (0.9, 1.3)
+
+
+def test_import_explanation_is_shown():
+    at = new_app().run()
+    text = " ".join(c.value for c in at.caption)
+    assert "replaces the calculator, day/night and heatmap settings" in text
