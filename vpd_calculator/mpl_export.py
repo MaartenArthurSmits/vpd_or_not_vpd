@@ -76,8 +76,8 @@ def heatmap_mpl(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0, colorsca
             ax.plot([t], [rh], marker="*", markersize=16, markerfacecolor="white",
                     markeredgecolor="black", markeredgewidth=1.5, linestyle="none",
                     label=f"Selected: {t:.1f} °C, {rh:.1f} %")
-    if point is not None or handles:
-        entries = ax.get_legend_handles_labels()[0] + handles
+    entries = ax.get_legend_handles_labels()[0] + handles
+    if entries:
         ax.legend(handles=entries, loc="upper center", bbox_to_anchor=(0.5, -0.14),   # below the axis label
                   ncol=min(len(entries), 3), frameon=True, fontsize=9)
 
