@@ -46,9 +46,10 @@ def test_default_run_has_no_exceptions_and_known_values():
     assert metric(at, "Air VPD") == f"{vpd.vpd_air(22, 60):.1f} kPa" == "1.1 kPa"
 
 
-def test_exactly_four_tabs():
+def test_exactly_five_tabs():
     at = new_app().run()
-    assert [t.label for t in at.tabs] == ["Calculator", "Day & Night", "VPD Heatmap", "Methods & References"]
+    assert [t.label for t in at.tabs] == ["Calculator", "Day & Night", "Compare treatments", "VPD Heatmap",
+                                          "Methods & References"]
 
 
 def test_day_night_controls_and_results_are_in_their_own_tab_only():
