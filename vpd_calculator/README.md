@@ -9,6 +9,8 @@ Interactive vapour pressure deficit (VPD) calculator for controlled-environment 
 - **VPD Heatmap**: temperature x RH, air or leaf VPD, labelled contours, selected point and target region.
 - **Day/Night Experiments**: independent day/night settings, Control/Warming temperature presets,
   comparison table and plot across treatments.
+- **Measured Data**: upload a logger CSV (time, temperature, RH), map columns, see VPD over time and the
+  share of records inside your target interval. Unusable rows are excluded and reported.
 - **Methods**: equations, assumptions, references.
 
 Exports: heatmap PNG, temperature/RH/VPD grid CSV, treatment comparison CSV, current settings CSV.
@@ -28,6 +30,7 @@ In Positron, select the `.venv` interpreter and use the Run App button on `app.p
 ## Tests
 
 ```powershell
+pip install -r requirements-dev.txt
 python -m pytest
 ```
 
@@ -37,6 +40,8 @@ python -m pytest
 |---|---|
 | `vpd.py` | Calculations (FAO-56), validation, grids, treatment tables |
 | `plots.py` | Plotly figures |
+| `share.py` | Shareable-link (URL query parameter) encoding |
+| `logger_data.py` | Logger CSV cleaning and VPD calculation |
 | `app.py` | Streamlit interface |
 | `tests/` | pytest suite |
 

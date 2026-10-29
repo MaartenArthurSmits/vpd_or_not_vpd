@@ -5,7 +5,9 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+import logger_data
 import plots
+import share
 import vpd
 
 st.set_page_config(page_title="VPD Calculator", page_icon="🌿", layout="wide")
@@ -36,6 +38,11 @@ DEFAULTS = {
 for k, v in DEFAULTS.items():
     st.session_state.setdefault(k, v)
 
+# Settings from a shared link are applied once, at the start of the session.
+if "_share_loaded" not in st.session_state:
+    st.session_state.update(share.parse_params(st.query_params.to_dict()))
+    st.session_state["_share_loaded"] = True
+
 
 def linked(label, key, lo, hi, step, fmt="%.2f", num_min=None, num_max=None, help=None):
     """Number input + slider bound to one canonical value (`key`)."""
@@ -60,9 +67,9 @@ def linked(label, key, lo, hi, step, fmt="%.2f", num_min=None, num_max=None, hel
 
 def leaf_inputs(prefix, t_air):
     """Returns (effective_offset, measured_or_None)."""
-    method = st.radio("Leaf temperature input", ["Offset from air", "Measured leaf temperature"],
+    method = st.radio("Leaf temperature input", [share.OFFSET_METHOD, share.MEASURED_METHOD],
                       key=f"{prefix}_leaf_method", horizontal=True)
-    if method == "Offset from air":
+    if method == share.OFFSET_METHOD:
         off = linked("Leaf temperature offset (°C)", f"{prefix}_offset", -10.0, 10.0, 0.1,
                      help="Leaf temperature minus air temperature. Transpiring leaves are often cooler (negative offset).")
         return off, None
@@ -78,8 +85,8 @@ def to_csv(df):
     return df.to_csv(index=False).encode("utf-8")
 
 
-tab_calc, tab_heat, tab_dn, tab_methods = st.tabs(
-    ["Calculator", "VPD Heatmap", "Day/Night Experiments", "Methods"])
+tab_calc, tab_heat, tab_dn, tab_data, tab_methods = st.tabs(
+    ["Calculator", "VPD Heatmap", "Day/Night Experiments", "Measured Data", "Methods"])
 
 # ==========================================================================
 # Calculator
@@ -88,9 +95,8 @@ with tab_calc:
     st.title("Vapour Pressure Deficit calculator")
     mode = st.radio(
         "Calculation mode",
-        ["Calculate VPD (from temperature and RH)", "Calculate required RH (from target VPD)"],
-        key="mode", horizontal=True)
-    mode_a = mode.startswith("Calculate VPD")
+        [share.MODE_A, share.MODE_B], key="mode", horizontal=True)
+    mode_a = mode == share.MODE_A
 
     left, right = st.columns([5, 6], gap="large")
     with left:
@@ -202,6 +208,13 @@ with tab_calc:
              if k not in ("mode", "kind", "target_vpd", "warnings", "message")}).items()])
     st.download_button("Download current settings and results (CSV)", to_csv(settings),
                        "vpd_current_settings.csv", "text/csv")
+
+    # Keep the address bar in sync so the current URL is always a shareable link.
+    st.query_params.from_dict(share.build_params(st.session_state))
+    with st.expander("Share these settings"):
+        st.caption("Opening this link restores the calculator mode, temperature, RH, target VPD, "
+                   "leaf temperature and target interval.")
+        st.code(share.share_url(st.session_state), language=None)
 
 # ==========================================================================
 # Heatmap
@@ -337,6 +350,96 @@ with tab_dn:
         st.plotly_chart(plots.treatment_figure(cmp_df), width="stretch")
         st.download_button("Download treatment comparison (CSV)", to_csv(cmp_df),
                            "vpd_treatment_comparison.csv", "text/csv")
+
+# ==========================================================================
+# Measured data
+# ==========================================================================
+with tab_data:
+    st.subheader("Measured data from a logger")
+    st.caption("Upload a CSV with temperature (°C) and RH over time. Rows with missing values, "
+               "unparseable times or RH outside 0-100 % are excluded and counted below. "
+               "Data are processed in your session and not stored.")
+    up = st.file_uploader("Logger CSV", type=["csv", "txt"], key="data_upload")
+    use_example = st.checkbox("Use synthetic example data (not real measurements)", key="data_example")
+
+    raw = None
+    if up is not None:
+        try:
+            raw = pd.read_csv(up, sep=None, engine="python")
+        except Exception as e:
+            st.error(f"Could not read the file as CSV ({type(e).__name__}).")
+    elif use_example:
+        raw = logger_data.example_data()
+
+    if raw is None or raw.empty:
+        st.info("Upload a file or tick the example data option to begin.")
+    else:
+        cols = list(raw.columns)
+        guess = logger_data.guess_columns(cols)
+        NONE = "(none)"
+
+        def pick(label, g, key, allow_none=False):
+            options = ([NONE] if allow_none else []) + cols
+            idx = options.index(g) if g in options else 0
+            return st.selectbox(label, options, index=idx, key=key)
+
+        k1, k2, k3, k4 = st.columns(4)
+        with k1:
+            time_sel = pick("Time column", guess["time"], "data_time", allow_none=True)
+        with k2:
+            temp_sel = pick("Air temperature column (°C)", guess["temp"], "data_temp")
+        with k3:
+            rh_sel = pick("RH column", guess["rh"], "data_rh")
+        with k4:
+            rh_unit = st.radio("RH unit", ["%", "fraction"], key="data_rh_unit", horizontal=True)
+        l1, l2 = st.columns(2)
+        with l1:
+            leaf_src = st.radio("Leaf temperature", ["Offset from air", "Measured column"],
+                                key="data_leaf_src", horizontal=True)
+        with l2:
+            if leaf_src == "Offset from air":
+                leaf_off = st.number_input("Leaf temperature offset (°C)", value=0.0, step=0.1,
+                                           key="data_offset")
+                leaf_col = None
+            else:
+                leaf_col = pick("Leaf temperature column (°C)", guess["leaf"], "data_leaf")
+                leaf_off = 0.0
+
+        clean, rep = logger_data.load_logger_data(
+            raw, None if time_sel == NONE else time_sel, temp_sel, rh_sel, rh_unit,
+            leaf_col, leaf_off)
+        st.caption(f"{rep['rows_used']} of {rep['rows_in']} rows used.")
+        if rep["dropped_bad_time"] or rep["dropped_missing_values"] or rep["dropped_rh_out_of_range"]:
+            st.warning(
+                f"Excluded rows: {rep['dropped_bad_time']} with unparseable time, "
+                f"{rep['dropped_missing_values']} with missing/non-numeric values, "
+                f"{rep['dropped_rh_out_of_range']} with RH outside 0-100 % "
+                "(if RH is a 0-1 fraction, change the RH unit).")
+        if rep["temperature_outside_-10_60_kept"]:
+            st.warning(f"{rep['temperature_outside_-10_60_kept']} rows have temperatures outside "
+                       "-10 to 60 °C; they were kept, please check your sensor data.")
+        if rep["negative_leaf_vpd_rows"]:
+            st.warning(f"{rep['negative_leaf_vpd_rows']} rows have negative leaf VPD "
+                       "(possible condensation).")
+
+        if clean.empty:
+            st.error("No usable rows remain. Check the selected columns and units.")
+        else:
+            interval_for_data = (lo, hi) if interval_ok else None
+            summ = logger_data.summarise(clean, lo, hi, ikind) if interval_ok else None
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Mean air VPD", f"{clean['VPD_air_kPa'].mean():.3f} kPa")
+            m2.metric("Mean leaf VPD", f"{clean['VPD_leaf_kPa'].mean():.3f} kPa")
+            m3.metric("Air VPD range", f"{clean['VPD_air_kPa'].min():.2f} - {clean['VPD_air_kPa'].max():.2f} kPa")
+            if summ:
+                m4.metric(f"Records inside {lo:.2f}-{hi:.2f} kPa ({ikind})", f"{summ['pct_inside']:.1f} %")
+                st.caption("Interval taken from the Calculator tab (user-defined). The share counts "
+                           "records, so it equals share of time only for evenly spaced sampling.")
+            st.plotly_chart(plots.timeseries_figure(clean, interval_for_data, ikind), width="stretch")
+            with st.expander("Processed data"):
+                st.dataframe(clean, hide_index=True, width="stretch")
+            st.download_button("Download processed data with VPD (CSV)", to_csv(clean),
+                               "vpd_logger_processed.csv", "text/csv")
 
 # ==========================================================================
 # Methods

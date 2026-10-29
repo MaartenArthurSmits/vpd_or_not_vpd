@@ -112,6 +112,30 @@ def vpd_vs_rh_figure(t_air, offset, kind, interval=None, rh_range=None, point_rh
     return fig
 
 
+def timeseries_figure(clean: pd.DataFrame, interval=None, kind=vpd.AIR, template=None) -> go.Figure:
+    """VPD, temperature and RH over time for logger data (output of logger_data)."""
+    fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.06,
+                        row_heights=[0.5, 0.25, 0.25],
+                        subplot_titles=("VPD (kPa)", "Temperature (°C)", "Relative humidity (%)"))
+    x = clean["time"]
+    fig.add_trace(go.Scattergl(x=x, y=clean["VPD_air_kPa"], mode="lines", name="Air VPD",
+                               hovertemplate="%{y:.3f} kPa<extra>Air VPD</extra>"), row=1, col=1)
+    fig.add_trace(go.Scattergl(x=x, y=clean["VPD_leaf_kPa"], mode="lines", name="Leaf VPD",
+                               line=dict(dash="dash"),
+                               hovertemplate="%{y:.3f} kPa<extra>Leaf VPD</extra>"), row=1, col=1)
+    if interval is not None:
+        fig.add_hrect(y0=interval[0], y1=interval[1], row=1, col=1, opacity=0.15,
+                      fillcolor="green", line_width=0,
+                      annotation_text=f"target {kind} VPD (user-defined)", annotation_position="top left")
+    fig.add_trace(go.Scattergl(x=x, y=clean["temperature_C"], mode="lines", name="Air temperature",
+                               hovertemplate="%{y:.2f} °C<extra>Air temperature</extra>"), row=2, col=1)
+    fig.add_trace(go.Scattergl(x=x, y=clean["RH_percent"], mode="lines", name="RH",
+                               hovertemplate="%{y:.1f} %<extra>RH</extra>"), row=3, col=1)
+    fig.update_layout(template=template, height=720, margin=dict(l=60, r=20, t=50, b=40),
+                      legend=dict(orientation="h", y=-0.08))
+    return fig
+
+
 def treatment_figure(df: pd.DataFrame, rh_label="RH (%)", template=None) -> go.Figure:
     """Grouped comparison of RH and VPD across treatments, coloured by day/night."""
     fig = make_subplots(rows=1, cols=2, subplot_titles=(rh_label, "VPD (kPa): bars = air, diamonds = leaf"),
