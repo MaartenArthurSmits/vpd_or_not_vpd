@@ -7,7 +7,9 @@ import streamlit as st
 
 import logger_data
 import plots
+import rscript
 import share
+import validation
 import vpd
 
 st.set_page_config(page_title="VPD Calculator", page_icon="🌿", layout="wide")
@@ -86,7 +88,7 @@ def to_csv(df):
 
 
 tab_calc, tab_heat, tab_dn, tab_data, tab_methods = st.tabs(
-    ["Calculator", "VPD Heatmap", "Day/Night Experiments", "Measured Data", "Methods"])
+    ["Calculator", "VPD Heatmap", "Day/Night Experiments", "Measured Data", "Methods & References"])
 
 # ==========================================================================
 # Calculator
@@ -207,7 +209,15 @@ with tab_calc:
             {k: v for k, v in results_row.items()
              if k not in ("mode", "kind", "target_vpd", "warnings", "message")}).items()])
     st.download_button("Download current settings and results (CSV)", to_csv(settings),
-                       "vpd_current_settings.csv", "text/csv")
+                       "vpd_current_settings.csv", "text/csv", key="dl_settings_csv")
+
+    leaf_t = measured if measured is not None else t_air + offset
+    r_code = rscript.build_r_script(
+        mode_a, t_air, st.session_state["rh"], st.session_state["target_vpd"],
+        kind_from_label(st.session_state.get("target_kind", "Air VPD")), leaf_t,
+        (lo, hi) if interval_ok else None, ikind)
+    st.download_button("Download reproducible R script", r_code.encode("utf-8"),
+                       "vpd_calculation.R", "text/plain", key="dl_rscript")
 
     # Keep the address bar in sync so the current URL is always a shareable link.
     st.query_params.from_dict(share.build_params(st.session_state))
@@ -254,9 +264,9 @@ with tab_heat:
 
         d1, d2 = st.columns(2)
         grid = vpd.vpd_grid(t_min, t_max, rh_min, rh_max, 0.5, 1.0, offset=offset)
-        d1.download_button("Download grid (CSV)", to_csv(grid), "vpd_grid.csv", "text/csv")
+        d1.download_button("Download grid (CSV)", to_csv(grid), "vpd_grid.csv", "text/csv", key="dl_grid_csv")
         sig = (t_min, t_max, rh_min, rh_max, hm_kind, round(offset, 6), cscale, cstep, zmax_in, pt, tg)
-        if d2.button("Prepare publication-quality PNG"):
+        if d2.button("Prepare publication-quality PNG", key="png_prepare"):
             try:
                 export = plots.heatmap_figure(t_min, t_max, rh_min, rh_max, hm_kind, offset, cscale,
                                               cstep, zmax_in or None, pt, tg,
@@ -269,7 +279,7 @@ with tab_heat:
                         "to download a PNG instead, or run the app locally with Chrome installed.")
                 st.caption(f"Details: {type(e).__name__}")
         if "png" in st.session_state and st.session_state["png"][0] == sig:
-            d2.download_button("Download PNG", st.session_state["png"][1], "vpd_heatmap.png", "image/png")
+            d2.download_button("Download PNG", st.session_state["png"][1], "vpd_heatmap.png", "image/png", key="png_download")
 
 # ==========================================================================
 # Day / night experiments
@@ -349,7 +359,7 @@ with tab_dn:
                                    {"RH (%)": st.column_config.NumberColumn(format="%.2f")})
         st.plotly_chart(plots.treatment_figure(cmp_df), width="stretch")
         st.download_button("Download treatment comparison (CSV)", to_csv(cmp_df),
-                           "vpd_treatment_comparison.csv", "text/csv")
+                           "vpd_treatment_comparison.csv", "text/csv", key="dl_treatment_csv")
 
 # ==========================================================================
 # Measured data
@@ -439,7 +449,7 @@ with tab_data:
             with st.expander("Processed data"):
                 st.dataframe(clean, hide_index=True, width="stretch")
             st.download_button("Download processed data with VPD (CSV)", to_csv(clean),
-                               "vpd_logger_processed.csv", "text/csv")
+                               "vpd_logger_processed.csv", "text/csv", key="dl_logger_csv")
 
 # ==========================================================================
 # Methods
@@ -466,7 +476,132 @@ with tab_methods:
 - Target VPD intervals are user-defined and are not validated optima for *Fragaria vesca* or any other species.
 - The leaf-offset heatmap uses a constant offset across all air temperatures.
 
-**References**
-- Allen, R.G., Pereira, L.S., Raes, D., Smith, M. (1998). *Crop evapotranspiration: guidelines for computing crop water requirements.* FAO Irrigation and Drainage Paper 56. Food and Agriculture Organization of the United Nations, Rome. Equation 11 (saturation vapour pressure) is in Chapter 3, "Meteorological data": https://www.fao.org/4/x0490e/x0490e07.htm (full document: https://www.fao.org/4/x0490e/x0490e00.htm)
+**References** (APA 7)
+"""
+    )
+    st.markdown(
+        """
+- Allen, R. G., Pereira, L. S., Raes, D., & Smith, M. (1998). *Crop evapotranspiration: Guidelines for computing crop water requirements* (FAO Irrigation and Drainage Paper No. 56). Food and Agriculture Organization of the United Nations. https://www.fao.org/4/x0490e/x0490e00.htm (Eq. 11: https://www.fao.org/4/x0490e/x0490e07.htm; Annex 2, Table 2.3: https://www.fao.org/4/x0490e/x0490e0j.htm)
+- Garen, J. C., Crous, K. Y., Barton, C. V. M., Rymer, P. D., & Tjoelker, M. G. (2026). Joint dependence of leaf minimum conductance on vapor pressure deficit and temperature. *Plant Physiology, 201*(4), Article kiag575. https://doi.org/10.1093/plphys/kiag575
+- Grossiord, C., Buckley, T. N., Cernusak, L. A., Novick, K. A., Poulter, B., Siegwolf, R. T. W., Sperry, J. S., & McDowell, N. G. (2020). Plant responses to rising vapor pressure deficit. *New Phytologist, 226*(6), 1550–1566. https://doi.org/10.1111/nph.16485
+- Johnston, M. R., Barnes, M. L., Preisler, Y., Smith, W. K., Biederman, J. A., Scott, R. L., Williams, A. P., & Dannenberg, M. P. (2025). Effects of hot versus dry vapor pressure deficit on ecosystem carbon and water fluxes. *Journal of Geophysical Research: Biogeosciences, 130*(1), Article e2024JG008146. https://doi.org/10.1029/2024JG008146
 - Interface inspiration only (not a source for the equations): Pulse Grow, *Vapor Pressure Deficit (VPD)* guide. https://pulsegrow.com/blogs/learn/vpd
-""")
+"""
+    )
+
+    with st.expander("Scientific validation", expanded=False):
+        st.markdown(
+            "This section checks the application's calculations against published values. "
+            "Comparisons below are **computed live** by calling the same functions the calculator uses. "
+            "The automated test suite (run separately, e.g. in CI) is documented in "
+            "[docs/VALIDATION.md](https://github.com/MaartenArthurSmits/vpd_or_not_vpd/blob/main/docs/VALIDATION.md)."
+        )
+
+        st.markdown("#### A. Comparison with published research")
+        st.markdown(
+            """
+- **Grossiord et al. (2020), Figure 2**: relationships between temperature, relative humidity, atmospheric
+  vapour pressure and VPD. https://doi.org/10.1111/nph.16485
+- **Johnston et al. (2025), Figure 1**: different temperature and RH combinations that give an equivalent VPD.
+  https://doi.org/10.1029/2024JG008146
+- **Garen et al. (2026), Figure 1a**: a psychrometric chart relating temperature, RH and VPD, with
+  physically impossible combinations indicated. https://doi.org/10.1093/plphys/kiag575
+
+These figures are not reproduced here (publisher copyright); follow the links to view them. The VPD heatmap and
+the plot below are original visualisations of the same relationships. The published figures support the
+expected qualitative relationships but are **not by themselves a numerical validation** of this application.
+"""
+        )
+
+        st.markdown("#### B. Numerical reference comparison")
+        st.markdown(
+            """
+Four kinds of evidence are kept separate:
+1. **Agreement with published tabulated values**: FAO-56 Annex 2, Table 2.3 (tables below).
+2. **Agreement with an alternative published equation**: Johnston et al. (2025). The two equations are closely
+   related empirical fits, so agreement shows consistency between formulations, not measurement accuracy.
+3. **Internal consistency**: forward/reverse round trips, monotonicity and limiting cases (automated tests).
+4. **Browser/interface tests**: the rendered app shows the expected numbers (automated tests).
+
+None of these are experimental measurements.
+"""
+        )
+        es_df = validation.es_comparison()
+        st.caption(f"Saturation vapour pressure vs FAO-56 Table 2.3 (published to 3 d.p.; tolerance "
+                   f"±{validation.TOL_ES_KPA:.4f} kPa).")
+        st.dataframe(es_df, hide_index=True, width="stretch", key="val_es_table",
+                     column_config={c: st.column_config.NumberColumn(format="%.4f")
+                                    for c in ("Published es (kPa)", "Application es (kPa)")} |
+                                   {"Difference (kPa)": st.column_config.NumberColumn(format="%.5f")})
+        st.caption("Alternative equation (Johnston et al., 2025): " + validation.JOHNSTON_FORMULA)
+        st.dataframe(validation.alternative_equation_comparison(), hide_index=True, width="stretch",
+                     key="val_alt_table",
+                     column_config={c: st.column_config.NumberColumn(format="%.4f")
+                                    for c in ("Johnston reference VPD (kPa)", "Johnston equation, computed (kPa)",
+                                              "Application VPD (kPa)")} |
+                                   {"Application - Johnston (kPa)": st.column_config.NumberColumn(format="%.5f")})
+        mx = validation.max_abs_differences()
+        st.caption(
+            f"Largest absolute differences: es vs FAO-56 table {mx['es_vs_FAO_table']:.5f} kPa; "
+            f"VPD vs FAO-56 reference {mx['vpd_vs_FAO_reference']:.5f} kPa; "
+            f"application vs Johnston equation {mx['application_vs_Johnston_equation']:.5f} kPa. "
+            "The equations differ slightly because their saturation-vapour-pressure coefficients differ.")
+
+        st.markdown("#### C. Air VPD versus relative humidity")
+        c1, c2 = st.columns([3, 1])
+        val_temps = c1.multiselect("Temperatures (°C)", list(range(0, 46)), default=[20, 25, 30],
+                                   key="val_temps")
+        val_alt = c2.checkbox("Overlay Johnston et al. (2025)", key="val_johnston")
+        if not val_temps:
+            st.info("Select at least one temperature.")
+        else:
+            curves = validation.reference_curves(sorted(val_temps))
+            st.plotly_chart(plots.reference_figure(curves, val_alt), width="stretch")
+            st.plotly_chart(plots.reference_difference_figure(curves), width="stretch")
+            st.markdown(
+                """
+- At constant air temperature, VPD decreases linearly with RH.
+- At constant RH, VPD increases with temperature.
+- Air VPD is zero at 100 % RH.
+- The two equations give slightly different values because their coefficients differ (difference shown above).
+- Primary curves use FAO-56 with a leaf offset of 0 °C (air VPD does not depend on leaf temperature).
+"""
+            )
+            g1, g2 = st.columns(2)
+            g1.download_button("Download VPD-vs-RH numerical results (CSV)", to_csv(curves),
+                               "vpd_vs_rh_reference.csv", "text/csv", key="dl_val_csv")
+            if g2.button("Prepare VPD-vs-RH graph (PNG)", key="val_png_prepare"):
+                try:
+                    st.session_state["val_png"] = plots.reference_figure(
+                        curves, val_alt, template="plotly_white").to_image(
+                        format="png", width=1200, height=700, scale=2)
+                except Exception as e:
+                    st.session_state.pop("val_png", None)
+                    st.info("Server-side PNG export is not available here (needs Chrome/Chromium). "
+                            "Use the camera icon in the chart toolbar instead.")
+                    st.caption(f"Details: {type(e).__name__}")
+            if "val_png" in st.session_state:
+                g2.download_button("Download VPD-vs-RH graph (PNG)", st.session_state["val_png"],
+                                   "vpd_vs_rh.png", "image/png", key="dl_val_png")
+
+        st.markdown("#### D. Validation table")
+        st.caption("Air VPD from the production function vs the FAO-56 reference values "
+                   f"(reference rounded to 4 d.p.; tolerance ±{validation.TOL_VPD_KPA:.4f} kPa). "
+                   "Values are compared at full precision before formatting. Outcomes are evaluated now, "
+                   "when this page is rendered.")
+        st.dataframe(validation.vpd_comparison(), hide_index=True, width="stretch", key="val_vpd_table",
+                     column_config={c: st.column_config.NumberColumn(format="%.4f")
+                                    for c in ("FAO-56 reference VPD (kPa)", "Application VPD (kPa)")} |
+                                   {"Difference (kPa)": st.column_config.NumberColumn(format="%.5f")})
+        with st.expander("Inspect an additional example"):
+            e1, e2 = st.columns(2)
+            ex_t = e1.number_input("Air temperature (°C)", value=27.5, step=0.5, format="%.2f", key="val_extra_t")
+            ex_rh = e2.number_input("RH (%)", value=65.0, min_value=0.0, max_value=100.0, step=1.0,
+                                    format="%.2f", key="val_extra_rh")
+            st.dataframe(pd.DataFrame([validation.additional_example(ex_t, ex_rh)]), hide_index=True,
+                         width="stretch", key="val_extra_table",
+                         column_config={c: st.column_config.NumberColumn(format="%.4f")
+                                        for c in ("Application VPD (kPa)", "Johnston equation VPD (kPa)")} |
+                                       {"Application - Johnston (kPa)": st.column_config.NumberColumn(format="%.5f")})
+            st.caption("No published reference value exists for arbitrary inputs, so this example is compared "
+                       "with the alternative equation only.")

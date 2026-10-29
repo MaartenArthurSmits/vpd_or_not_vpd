@@ -43,7 +43,10 @@ python -m pytest
 | `share.py` | Shareable-link (URL query parameter) encoding |
 | `logger_data.py` | Logger CSV cleaning and VPD calculation |
 | `app.py` | Streamlit interface |
-| `tests/` | pytest suite |
+| `validation.py` | Reference values and comparisons shown in the app's validation section |
+| `rscript.py` | Reproducible R script export |
+| `tests/` | pytest suite (science, AppTest, Playwright e2e, export validation) |
+| `scripts/` | CI helper scripts |
 
 ## Notes
 

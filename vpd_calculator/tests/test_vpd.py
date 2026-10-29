@@ -8,6 +8,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import vpd  # noqa: E402
 
+pytestmark = pytest.mark.science
+
 
 def test_air_vpd_22c_60rh():
     assert vpd.vpd_air(22, 60) == pytest.approx(1.0576, abs=2e-3)

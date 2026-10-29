@@ -11,6 +11,7 @@ An interactive vapour pressure deficit (VPD) calculator for controlled-environme
 - Day/night treatment comparison (Control/Warming temperature presets)
 - Measured-data tab: upload logger CSVs (temperature, RH over time) and plot VPD
 - Shareable links that restore calculator settings
+- Scientific validation against FAO-56 tables and an alternative published equation (Methods & References tab)
 - CSV and PNG exports
 
 **Use it online:** https://vpd-or-not-vpd.streamlit.app/
@@ -25,7 +26,26 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Run the tests (from `vpd_calculator/`): `pip install -r requirements-dev.txt`, then `python -m pytest`.
+## Testing
+
+From `vpd_calculator/`:
+
+```powershell
+pip install -r requirements-dev.txt
+python -m playwright install chromium     # one-off, for browser tests
+
+python -m pytest -m "science or unit"      # scientific + unit tests
+python -m pytest -m apptest                # Streamlit AppTest interaction tests
+python -m pytest -m "e2e and not exports"  # Playwright browser tests (starts a local server)
+python -m pytest -m exports                # export-file validation (CSV, PNG, R script)
+python -m pytest                           # all
+```
+
+Screenshots (desktop and mobile), downloaded files and console diagnostics go to
+`vpd_calculator/tests/artifacts/`. This folder is git-ignored; GitHub Actions uploads it as the
+`test-artifacts` artifact. Widgets have stable `key`s and tests use accessible labels, so they are easy to extend.
+
+See [docs/VALIDATION.md](docs/VALIDATION.md) for the scientific validation (published reference values, tolerances, limitations).
 
 See [vpd_calculator/README.md](vpd_calculator/README.md) for details, project layout and notes.
 

@@ -11,6 +11,8 @@ import logger_data  # noqa: E402
 import share  # noqa: E402
 import vpd  # noqa: E402
 
+pytestmark = pytest.mark.unit
+
 
 # ---- share ---------------------------------------------------------------
 STATE = {"mode": share.MODE_B, "t_air": 25.5, "rh": 55.0, "target_vpd": 1.25,

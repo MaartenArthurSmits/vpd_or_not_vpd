@@ -11,6 +11,8 @@ import logger_data  # noqa: E402
 import plots  # noqa: E402
 import vpd  # noqa: E402
 
+pytestmark = pytest.mark.unit
+
 
 def kinds(fig):
     return [type(t).__name__ for t in fig.data]

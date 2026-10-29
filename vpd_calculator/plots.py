@@ -136,6 +136,39 @@ def timeseries_figure(clean: pd.DataFrame, interval=None, kind=vpd.AIR, template
     return fig
 
 
+def reference_figure(curves: pd.DataFrame, show_johnston: bool = False, template=None) -> go.Figure:
+    """Air VPD vs RH, one colour per temperature. FAO-56 solid; Johnston et al. (2025) dashed."""
+    fig = go.Figure()
+    for t, d in curves.groupby("temperature_C", sort=True):
+        fig.add_trace(go.Scatter(
+            x=d["RH_percent"], y=d["VPD_FAO56_kPa"], mode="lines", name=f"{t:g} °C (FAO-56)",
+            legendgroup=f"{t:g}", hovertemplate="RH %{x:.1f} %<br>%{y:.4f} kPa<extra>" + f"{t:g} °C FAO-56</extra>"))
+        if show_johnston:
+            fig.add_trace(go.Scatter(
+                x=d["RH_percent"], y=d["VPD_Johnston_kPa"], mode="lines", name=f"{t:g} °C (Johnston)",
+                legendgroup=f"{t:g}", line=dict(dash="dash", width=1.5),
+                hovertemplate="RH %{x:.1f} %<br>%{y:.4f} kPa<extra>" + f"{t:g} °C Johnston</extra>"))
+    fig.update_layout(template=template, height=420, margin=dict(l=60, r=20, t=40, b=50),
+                      xaxis=dict(title="Relative humidity (%)", range=[0, 100]),
+                      yaxis=dict(title="Air VPD (kPa)", rangemode="tozero"),
+                      title="Air VPD vs relative humidity (leaf offset 0 °C)")
+    return fig
+
+
+def reference_difference_figure(curves: pd.DataFrame, template=None) -> go.Figure:
+    """FAO-56 minus Johnston VPD (kPa) vs RH."""
+    fig = go.Figure()
+    for t, d in curves.groupby("temperature_C", sort=True):
+        fig.add_trace(go.Scatter(
+            x=d["RH_percent"], y=d["difference_FAO56_minus_Johnston_kPa"], mode="lines",
+            name=f"{t:g} °C", hovertemplate="RH %{x:.1f} %<br>%{y:.5f} kPa<extra>" + f"{t:g} °C</extra>"))
+    fig.update_layout(template=template, height=300, margin=dict(l=70, r=20, t=40, b=50),
+                      xaxis=dict(title="Relative humidity (%)", range=[0, 100]),
+                      yaxis=dict(title="FAO-56 minus Johnston (kPa)", tickformat=".3f"),
+                      title="Difference between the two saturation-vapour-pressure equations")
+    return fig
+
+
 def treatment_figure(df: pd.DataFrame, rh_label="RH (%)", template=None) -> go.Figure:
     """Grouped comparison of RH and VPD across treatments, coloured by day/night."""
     fig = make_subplots(rows=1, cols=2, subplot_titles=(rh_label, "VPD (kPa): bars = air, diamonds = leaf"),

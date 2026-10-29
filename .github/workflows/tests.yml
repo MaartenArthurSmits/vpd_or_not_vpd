@@ -2,11 +2,14 @@ name: tests
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
-  pytest:
+  test:
     runs-on: ubuntu-latest
+    env:
+      CI: "true"
     defaults:
       run:
         working-directory: vpd_calculator
@@ -17,5 +20,36 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: vpd_calculator/requirements*.txt
-      - run: pip install -r requirements-dev.txt
-      - run: python -m pytest -q
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+      - name: Install Python dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Install Playwright Chromium
+        run: python -m playwright install --with-deps chromium
+      - name: Install Chrome for Plotly PNG export (kaleido)
+        run: python -c "import kaleido; kaleido.get_chrome_sync()"
+      - run: mkdir -p tests/artifacts
+
+      - name: 1. Scientific and unit tests
+        run: python -m pytest -m "science or unit" -q --junitxml=tests/artifacts/junit-1-science.xml
+      - name: 2. Streamlit AppTest
+        if: always()
+        run: python -m pytest -m apptest -q --junitxml=tests/artifacts/junit-2-apptest.xml
+      - name: 3. Playwright browser tests
+        if: always()
+        run: python -m pytest -m "e2e and not exports" -q --junitxml=tests/artifacts/junit-3-browser.xml
+      - name: 4. Export-file validation
+        if: always()
+        run: python -m pytest -m exports -q --junitxml=tests/artifacts/junit-4-exports.xml
+
+      - name: Test summary
+        if: always()
+        run: python scripts/summarize_junit.py tests/artifacts/junit-*.xml >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload screenshots, downloads and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-artifacts
+          path: vpd_calculator/tests/artifacts/
+          if-no-files-found: warn
