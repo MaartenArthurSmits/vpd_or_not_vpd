@@ -1,10 +1,14 @@
-"""Scientific tests: published reference values, an independent alternative equation,
+"""Scientific tests: published tabulated values, calculated benchmarks, an alternative equation,
 and mathematical properties. Tolerances are stated explicitly below.
 
 Evidence categories (kept separate on purpose):
-  1. agreement with published tabulated values (FAO-56 Table 2.3, FAO-56 reference VPDs)
-  2. agreement with an alternative published equation (Johnston et al., 2025)
-  3. internal consistency / mathematical properties
+  1. agreement with PUBLISHED tabulated values: FAO-56 Annex 2, Table 2.3 (saturation vapour pressure)
+  2. agreement with CALCULATED benchmarks: air VPDs evaluated from the FAO-56 Eq. 11 constants (4 d.p.).
+     These are not printed in FAO-56 Table 2.3 and are not an independent source.
+  3. comparison with an alternative published equation (Johnston et al., 2025), implemented independently
+     here; its coefficients are verified against the paper (Eq. 2, external review 2026-10-29); its benchmark
+     VPDs are calculated from that equation (not verified to be printed in the paper)
+  4. internal consistency / mathematical properties
 None of these are experimental measurements.
 """
 
@@ -23,14 +27,19 @@ pytestmark = pytest.mark.science
 
 # ---- explicit tolerances -----------------------------------------------------
 TOL_TABLE_ES = 5.0e-4 + 1e-9      # kPa; FAO-56 Table 2.3 is rounded to 3 d.p. (half unit 5e-4)
-TOL_REF_VPD = 1.0e-4              # kPa; reference VPDs are rounded to 4 d.p. (half unit 5e-5)
+TOL_REF_VPD = 1.0e-4              # kPa; calculated benchmark VPDs are rounded to 4 d.p. (half unit 5e-5)
 TOL_EXACT = 1.0e-12               # kPa; same equation through different code paths
 TOL_RH_ROUNDTRIP = 1.0e-9         # percentage points; forward -> reverse round trip
 MAX_REL_EQ_DIFF = 3.0e-3          # |es_FAO - es_Johnston| / es over 0-40 degC (observed ~1e-3)
 
-# ---- reference data (transcribed from the task specification) ----------------
+# ---- reference data ---------------------------------------------------------
+# PUBLISHED: es values printed in FAO-56 Annex 2, Table 2.3 (rows T = 15.0 ... 35.0 checked against
+# https://www.fao.org/4/x0490e/x0490e0j.htm, 2026-10-29).
 FAO_ES = {15: 1.705, 20: 2.338, 22: 2.644, 25: 3.168, 30: 4.243, 33: 5.030, 35: 5.623}
-CASES = [  # T, RH, FAO-56 VPD, Johnston VPD
+# CALCULATED (not published): es(T) * (1 - RH/100) with the FAO-56 Eq. 11 / Johnston et al. (2025)
+# constants, rounded to 4 d.p. Origin: earlier project specification; reproduced at 4 d.p. by a
+# stand-alone calculation on 2026-10-29. Not printed in FAO-56 Table 2.3.
+CASES = [  # T, RH, FAO-56-equation VPD, Johnston-equation VPD
     (20, 50, 1.1691, 1.1710),
     (22, 60, 1.0576, 1.0593),
     (25, 60, 1.2671, 1.2691),
@@ -53,20 +62,21 @@ TEMPS = np.arange(-5.0, 50.0, 2.5)
 RHS = np.arange(0.0, 100.1, 12.5)
 
 
-# ===== 1. published tabulated values ==========================================
+# ===== 1. published tabulated values (FAO-56 Table 2.3) ========================
 @pytest.mark.parametrize("t,published", list(FAO_ES.items()))
 def test_es_matches_fao56_table_2_3(t, published):
     assert abs(vpd.saturation_vapour_pressure(t) - published) <= TOL_TABLE_ES
 
 
 @pytest.mark.parametrize("t,rh,fao,_j", CASES)
-def test_air_vpd_matches_fao56_reference_values(t, rh, fao, _j):
+def test_air_vpd_matches_calculated_fao56_benchmarks(t, rh, fao, _j):   # calculated, not published
     assert abs(vpd.calculate_vpd(t, rh).vpd_air - fao) <= TOL_REF_VPD
 
 
-# ===== 2. alternative published equation (independent implementation) =========
+# ===== 2. calculated benchmarks and the alternative published equation ==========
+# (the Johnston implementation below is independent of production code)
 @pytest.mark.parametrize("t,rh,_f,johnston", CASES)
-def test_independent_johnston_implementation_reproduces_published_values(t, rh, _f, johnston):
+def test_independent_johnston_implementation_reproduces_calculated_benchmarks(t, rh, _f, johnston):
     assert abs(johnston_vpd_independent(t, rh) - johnston) <= TOL_REF_VPD
 
 
@@ -91,18 +101,26 @@ def test_equation_difference_is_small_over_growth_range():
 
 def test_validation_tables_all_within_tolerance():
     assert (validation.es_comparison()["Outcome"] == "Within tolerance").all()
-    assert (validation.vpd_comparison()["Validation outcome"] == "Within tolerance").all()
+    assert (validation.vpd_comparison()["Outcome (vs calculated benchmark)"] == "Within tolerance").all()
     mx = validation.max_abs_differences()
     assert mx["es_vs_FAO_table"] <= TOL_TABLE_ES
-    assert mx["vpd_vs_FAO_reference"] <= TOL_REF_VPD
+    assert mx["vpd_vs_FAO56_benchmark"] <= TOL_REF_VPD
+
+
+def test_validation_table_labels_do_not_call_calculated_values_published():
+    assert "Published es (kPa)" in validation.es_comparison().columns
+    cols = list(validation.vpd_comparison().columns) + list(validation.alternative_equation_comparison().columns)
+    assert "FAO-56 calculated benchmark VPD (kPa)" in cols
+    assert "Johnston calculated benchmark VPD (kPa)" in cols
+    assert not any("published" in c.lower() for c in cols)
 
 
 def test_validation_flags_a_wrong_reference():
     bad = [(22, 60, 1.2000, 1.0593)]
-    assert validation.vpd_comparison(bad)["Validation outcome"].iloc[0] == "Outside tolerance"
+    assert validation.vpd_comparison(bad)["Outcome (vs calculated benchmark)"].iloc[0] == "Outside tolerance"
 
 
-# ===== 3. mathematical properties ==============================================
+# ===== 3. internal consistency: mathematical properties ==============================================
 def test_es_monotonic_in_temperature():
     es = vpd.saturation_vapour_pressure(np.arange(-10, 60, 0.25))
     assert np.all(np.diff(es) > 0)

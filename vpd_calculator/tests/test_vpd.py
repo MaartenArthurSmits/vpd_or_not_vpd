@@ -96,3 +96,49 @@ def test_grid_and_matrix_agree():
     g = vpd.vpd_grid(15, 30, 40, 90, 5, 10, offset=-2)
     m = vpd.vpd_matrix(np.arange(15, 31, 5), np.arange(40, 91, 10), vpd.LEAF, -2)
     assert np.allclose(g["VPD_leaf_kPa"].to_numpy().reshape(m.shape), m)
+
+
+# ---- classify_vpd: absolute floating-point tolerance at the target limits ----------------------
+def test_classify_tolerance_is_tiny_and_documented():
+    assert vpd.VPD_CLASSIFY_TOL == 1e-9
+
+
+@pytest.mark.parametrize("value,expected", [
+    (0.8, "inside"), (1.2, "inside"), (1.0, "inside"),                       # exact boundaries
+    (0.8 - 1e-12, "inside"), (0.8 + 1e-12, "inside"),                        # noise at the lower limit
+    (1.2 - 1e-12, "inside"), (1.2 + 1e-12, "inside"),                        # noise at the upper limit
+    (np.nextafter(1.2, 2.0), "inside"), (np.nextafter(0.8, 0.0), "inside"),  # one ulp outside
+    (0.8 - 1e-6, "below"), (0.8 - 0.01, "below"), (0.0, "below"), (-0.5, "below"),
+    (1.2 + 1e-6, "above"), (1.2 + 0.01, "above"), (5.0, "above"),
+])
+def test_classify_ordinary_range(value, expected):
+    assert vpd.classify_vpd(value, 0.8, 1.2) == expected
+
+
+def test_classify_tolerance_edge_is_not_widened_beyond_1e9():
+    assert vpd.classify_vpd(1.2 + 2e-9, 0.8, 1.2) == "above"
+    assert vpd.classify_vpd(0.8 - 2e-9, 0.8, 1.2) == "below"
+
+
+@pytest.mark.parametrize("value,expected", [
+    (1.0, "inside"), (1.0000000000000004, "inside"), (1.0 - 4e-16, "inside"), (1.0 + 5e-10, "inside"),
+    (1.0 + 1e-6, "above"), (1.0 - 1e-6, "below"), (1.01, "above"), (0.99, "below"),
+])
+def test_classify_equal_limits(value, expected):
+    assert vpd.classify_vpd(value, 1.0, 1.0) == expected
+
+
+@pytest.mark.parametrize("kind", [vpd.AIR, vpd.LEAF])
+def test_classify_reverse_calculation_at_25c_with_point_target(kind):
+    r = vpd.calculate_required_rh(25, 1.0, kind)
+    value = r.vpd_air if kind == vpd.AIR else r.vpd_leaf     # full precision, unrounded
+    assert vpd.classify_vpd(value, 1.0, 1.0) == "inside"
+    assert vpd.classify_vpd(value, 1.0, 1.2) == "inside"
+    assert vpd.classify_vpd(value, 0.8, 1.0) == "inside"
+
+
+def test_classify_25c_air_example_value_is_noisy():
+    value = vpd.calculate_required_rh(25, 1.0, vpd.AIR).vpd_air
+    assert value != 1.0 and abs(value - 1.0) < 1e-12        # the floating-point noise being absorbed
+    assert vpd.classify_vpd(value, 1.0, 1.0) == "inside"
+    assert (value > 1.0) == (value == 1.0000000000000004)    # documents the observed overshoot

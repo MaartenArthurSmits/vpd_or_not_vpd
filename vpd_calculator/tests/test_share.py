@@ -5,6 +5,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import presets  # noqa: E402
 import share  # noqa: E402
 
 pytestmark = pytest.mark.unit
@@ -41,3 +42,67 @@ def test_share_ignores_invalid_values():
 def test_share_url_contains_query():
     url = share.share_url(STATE, base="http://x/")
     assert url.startswith("http://x/?") and "t=25.5" in url
+
+
+# ---- day/night settings --------------------------------------------------------------------
+DN_STATE = STATE | {
+    "dn_t_day": 33.0, "dn_off_day": -2.0, "dn_lo_day": 1.0, "dn_hi_day": 1.0,
+    "dn_kind_day": share.LEAF_LABEL, "dn_preset_day": "Vegetative",
+    "dn_t_night": 17.0, "dn_off_night": 1.0, "dn_lo_night": 0.6, "dn_hi_night": 1.0,
+    "dn_kind_night": share.AIR_LABEL, "dn_preset_night": presets.CUSTOM,
+}
+
+
+def test_day_night_round_trip_including_equal_limits_and_identity():
+    params = share.build_params(DN_STATE)
+    assert {k: params[k] for k in ("dt", "doff", "dlo", "dhi", "dk", "dp", "nt", "noff", "nlo", "nhi", "nk", "np")} == {
+        "dt": "33", "doff": "-2", "dlo": "1", "dhi": "1", "dk": "leaf", "dp": "veg",
+        "nt": "17", "noff": "1", "nlo": "0.6", "nhi": "1", "nk": "air", "np": "custom"}
+    parsed = share.parse_params(params)
+    for k, v in DN_STATE.items():
+        if k != "calc_leaf_meas":
+            assert parsed[k] == v, k
+
+
+def test_every_preset_has_a_share_id_and_round_trips():
+    for name in presets.PRESET_NAMES:
+        for period in ("day", "night"):
+            parsed = share.parse_params(share.build_params(DN_STATE | {f"dn_preset_{period}": name}))
+            assert parsed[f"dn_preset_{period}"] == name
+
+
+def test_legacy_and_partial_links_leave_day_night_untouched():
+    legacy = share.parse_params({"m": "b", "t": "25", "rh": "60", "tv": "1.1", "lo": "1.2", "hi": "1.5"})
+    assert not any(k.startswith("dn_") for k in legacy)
+    partial = share.parse_params({"dt": "30", "nk": "leaf"})
+    assert partial == {"dn_t_day": 30.0, "dn_kind_night": share.LEAF_LABEL}
+
+
+def test_build_params_omits_day_night_when_state_has_none():
+    day_night_keys = {"dt", "doff", "dlo", "dhi", "dk", "dp", "nt", "noff", "nlo", "nhi", "nk", "np"}
+    assert not day_night_keys & set(share.build_params(STATE))
+
+
+@pytest.mark.parametrize("bad", [
+    {"dt": "abc"}, {"dt": "nan"}, {"dt": "inf"}, {"dt": "-inf"}, {"dt": "61"}, {"dt": "-10.1"}, {"dt": ""},
+    {"doff": "10.5"}, {"noff": "-11"}, {"noff": "NaN"}, {"dlo": "-0.1"}, {"dhi": "10.1"}, {"nlo": "1e999"},
+    {"dk": "water"}, {"nk": "AIR"}, {"dk": ""}, {"dp": "unknown"}, {"np": "Vegetative"}, {"dp": "1"},
+])
+def test_invalid_day_night_parameters_are_ignored(bad):
+    assert share.parse_params(bad) == {}
+
+
+def test_day_night_bounds_are_inclusive_and_not_clamped():
+    ok = share.parse_params({"dt": "60", "nt": "-10", "doff": "10", "noff": "-10", "dlo": "0", "nhi": "10"})
+    assert ok == {"dn_t_day": 60.0, "dn_t_night": -10.0, "dn_off_day": 10.0, "dn_off_night": -10.0,
+                  "dn_lo_day": 0.0, "dn_hi_night": 10.0}
+
+
+def test_resolve_stage_keeps_identity_for_identical_ranges_and_never_changes_limits():
+    # Vegetative night and General horticulture night are both 0.8-1.2
+    assert presets.resolve_stage("Vegetative", 0.8, 1.2, "night") == "Vegetative"
+    assert presets.resolve_stage("General horticulture", 0.8, 1.2, "night") == "General horticulture"
+    assert presets.resolve_stage(None, 0.8, 1.2, "night") == "General horticulture"      # derived
+    assert presets.resolve_stage(presets.CUSTOM, 1.0, 1.0, "day") == presets.CUSTOM
+    assert presets.resolve_stage("Flowering", 0.8, 1.2, "day") == "General horticulture"  # inconsistent id
+    assert presets.resolve_stage("Flowering", 0.7, 1.1, "day") == presets.CUSTOM

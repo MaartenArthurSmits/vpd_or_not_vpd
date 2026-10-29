@@ -68,7 +68,8 @@ if "_share_loaded" not in st.session_state:
     st.session_state["vpd_preset"] = presets.match_stage(st.session_state["vpd_lo"], st.session_state["vpd_hi"])
     st.session_state["calc_offset_preset"] = presets.match_offset_preset(st.session_state["calc_offset"])
     for _p in ("day", "night"):
-        st.session_state[f"dn_preset_{_p}"] = presets.match_stage(
+        st.session_state[f"dn_preset_{_p}"] = presets.resolve_stage(
+            st.session_state.get(f"dn_preset_{_p}"),          # saved identity from the link, if any
             st.session_state[f"dn_lo_{_p}"], st.session_state[f"dn_hi_{_p}"], _p)
         st.session_state[f"dn_offset_preset_{_p}"] = presets.match_offset_preset(st.session_state[f"dn_off_{_p}"])
     st.session_state["_share_loaded"] = True
@@ -261,17 +262,28 @@ Methods & References for sources and limitations.
             else:
                 pos = vpd.classify_vpd(cur, lo, hi)
                 txt = f"Current {ikind} VPD = {cur:.1f} kPa"
-                if pos == "inside":
+                if vpd.is_point_target(lo, hi):
+                    msg = f"{txt}: {vpd.classify_wording(pos)} ({lo:.1f} kPa)."
+                    (st.success if pos == "inside" else st.warning)(msg)
+                elif pos == "inside":
                     st.success(f"{txt}: inside the range {lo:.1f}-{hi:.1f} kPa.")
                 else:
                     st.warning(f"{txt}: {pos} the range {lo:.1f}-{hi:.1f} kPa.")
-            if rr["attainable"]:
+            if vpd.is_point_target(lo, hi):
+                st.markdown(f"**Target {ikind} VPD: {lo:.1f} kPa**")
+            if rr["attainable"] and vpd.is_point_target(lo, hi):
+                st.metric(f"Required RH for {ikind} VPD {lo:.1f} kPa at {t_air:.1f} °C",
+                          f"{rr['rh_min']:.1f} %")
+            elif rr["attainable"]:
                 st.metric(f"RH range for {ikind} VPD {lo:.1f}-{hi:.1f} kPa at {t_air:.1f} °C",
                           f"{rr['rh_min']:.1f} - {rr['rh_max']:.1f} %")
                 if not rr["fully_attainable"]:
                     st.warning(
                         f"Part of the range is unattainable: unclipped RH range is "
                         f"{rr['rh_min_raw']:.1f} to {rr['rh_max_raw']:.1f} %. Showing the attainable part.")
+            elif vpd.is_point_target(lo, hi):
+                st.error(f"No RH between 0 and 100 % gives a {ikind} VPD of {lo:.1f} kPa "
+                         f"(unclipped RH {rr['rh_min_raw']:.1f} %).")
             else:
                 st.error(f"No RH between 0 and 100 % gives a {ikind} VPD in this range "
                          f"(unclipped RH {rr['rh_min_raw']:.1f} to {rr['rh_max_raw']:.1f} %).")
@@ -321,12 +333,21 @@ Methods & References for sources and limitations.
                 st.error(f"{period}: lower limit must not exceed the upper limit.")
                 return
             d_rr = vpd.rh_range_for_vpd_range(t, dlo, dhi, dkind, off)
-            if d_rr["attainable"]:
+            d_point = vpd.is_point_target(dlo, dhi)
+            if d_point:
+                st.markdown(f"**{period} target {dkind} VPD: {dlo:.1f} kPa**")
+            if d_rr["attainable"] and d_point:
+                st.metric(f"{period} required RH for {dkind} VPD {dlo:.1f} kPa at {t:.1f} °C",
+                          f"{d_rr['rh_min']:.1f} %")
+            elif d_rr["attainable"]:
                 st.metric(f"{period} RH range for {dkind} VPD {dlo:.1f}-{dhi:.1f} kPa at {t:.1f} °C",
                           f"{d_rr['rh_min']:.1f} - {d_rr['rh_max']:.1f} %")
                 if not d_rr["fully_attainable"]:
                     st.warning(f"{period}: part of the range is unattainable (unclipped RH "
                                f"{d_rr['rh_min_raw']:.1f} to {d_rr['rh_max_raw']:.1f} %).")
+            elif d_point:
+                st.error(f"{period}: no RH between 0 and 100 % gives a {dkind} VPD of {dlo:.1f} kPa "
+                         f"(unclipped RH {d_rr['rh_min_raw']:.1f} %).")
             else:
                 st.error(f"{period}: no RH between 0 and 100 % gives a {dkind} VPD in this range "
                          f"(unclipped RH {d_rr['rh_min_raw']:.1f} to {d_rr['rh_max_raw']:.1f} %).")
@@ -335,7 +356,7 @@ Methods & References for sources and limitations.
                 msg = (f"**Condensation guidance:** with the leaf {abs(off):.1f} °C cooler than the air, leaf VPD "
                        f"reaches 0 at {rh_c:.1f} % RH. Above that RH, condensation on the leaf is possible.")
                 if d_rr["attainable"]:
-                    msg += (f" The top of your RH range ({d_rr['rh_max']:.1f} %) is "
+                    msg += (f" The {'required RH' if d_point else 'top of your RH range'} ({d_rr['rh_max']:.1f} %) is "
                             f"{'above' if d_rr['rh_max'] > rh_c else 'below'} that limit.")
                 (st.warning if d_rr["attainable"] and d_rr["rh_max"] > rh_c else st.info)(msg)
             else:
@@ -362,7 +383,10 @@ Methods & References for sources and limitations.
     st.query_params.from_dict(share.build_params(st.session_state))
     with st.expander("Share these settings"):
         st.caption("Opening this link restores the calculator mode, temperature, RH, target VPD, "
-                   "leaf temperature and target range.")
+                   "leaf temperature and target range, plus, independently for day and night: air "
+                   "temperature, leaf-temperature offset, lower and upper VPD limits, whether the range "
+                   "applies to air or leaf VPD, and the selected growth-stage preset (or Custom). "
+                   "Heatmap settings are not included.")
         st.code(share.share_url(st.session_state), language=None)
 
 # ==========================================================================
@@ -398,11 +422,17 @@ with tab_heat:
         pt = (t_air, current_rh) if (show_point and current_rh is not None) else None
         tg = (lo, hi) if (show_target and interval_ok) else None
         fig = plots.heatmap_figure(t_min, t_max, rh_min, rh_max, hm_kind, offset, cscale, cstep,
-                                   zmax_in or None, pt, tg)
+                                   zmax_in or None, pt, tg, target_kind=ikind)
         st.plotly_chart(fig, width="stretch", config={"toImageButtonOptions": {"format": "png", "scale": 2}})
         if tg:
-            st.caption(f"Dashed contours and light overlay: user-defined {hm_kind} VPD range "
-                       f"{lo:.1f}-{hi:.1f} kPa.")
+            if vpd.is_point_target(lo, hi):
+                st.caption(f"Dashed contour: user-defined single-value target **{ikind} VPD** "
+                           f"{lo:.1f} kPa (set by 'Range applies to' on the Calculator tab; "
+                           f"colours show {hm_kind} VPD).")
+            else:
+                st.caption(f"Dashed contours and light overlay: user-defined target **{ikind} VPD** range "
+                           f"{lo:.1f}-{hi:.1f} kPa (set by 'Range applies to' on the Calculator tab; "
+                           f"colours show {hm_kind} VPD).")
 
         d1, d2, d3 = st.columns(3)
         grid = vpd.vpd_grid(t_min, t_max, rh_min, rh_max, 0.5, 1.0, offset=offset)
@@ -410,7 +440,7 @@ with tab_heat:
 
         hm_params = dict(t_min=t_min, t_max=t_max, rh_min=rh_min, rh_max=rh_max, kind=hm_kind,
                          offset=offset, colorscale=cscale, contour_step=cstep, z_max=zmax_in or None,
-                         point=pt, target=tg)
+                         point=pt, target=tg, target_kind=ikind)
         leaf_t = measured if measured is not None else t_air + offset
         r_code = rscript.build_r_script(
             mode_a, t_air, st.session_state["rh"], st.session_state["target_vpd"],
@@ -420,10 +450,10 @@ with tab_heat:
                            "vpd_heatmap.R", "text/plain", key="dl_rscript",
                            help="Reproduces the calculation and this heatmap with ggplot2 (PNG and PDF export).")
 
-        sig = (t_min, t_max, rh_min, rh_max, hm_kind, round(offset, 6), cscale, cstep, zmax_in, pt, tg)
+        sig = (t_min, t_max, rh_min, rh_max, hm_kind, round(offset, 6), cscale, cstep, zmax_in, pt, tg, ikind)
         if d2.button("Prepare publication-quality PNG", key="png_prepare"):
             export = mpl_export.heatmap_mpl(t_min, t_max, rh_min, rh_max, hm_kind, offset, cscale, cstep,
-                                            zmax_in or None, pt, tg)
+                                            zmax_in or None, pt, tg, target_kind=ikind)
             st.session_state["png"] = (sig, mpl_export.to_bytes(export, "png", 300),
                                        mpl_export.to_bytes(export, "pdf"))
         if "png" in st.session_state and st.session_state["png"][0] == sig:
@@ -492,7 +522,8 @@ come from FAO-56 (Allen et al., 1998).
 
     with st.expander("Scientific validation", expanded=False):
         st.markdown(
-            "This section checks the application's calculations against published values. "
+            "This section compares the application's calculations with (i) saturation vapour pressures printed in a published table, "
+            "(ii) benchmarks calculated from published equations and (iii) an alternative published equation. "
             "Comparisons below are **computed live** by calling the same functions the calculator uses. "
             "The automated test suite (run separately, e.g. in CI) is documented in "
             "[docs/VALIDATION.md](https://github.com/MaartenArthurSmits/vpd_or_not_vpd/blob/main/docs/VALIDATION.md)."
@@ -514,15 +545,20 @@ expected qualitative relationships but are **not by themselves a numerical valid
 """
         )
 
-        st.markdown("#### B. Numerical reference comparison")
+        st.markdown("#### B. Numerical comparison")
         st.markdown(
             """
-Four kinds of evidence are kept separate:
-1. **Agreement with published tabulated values**: FAO-56 Annex 2, Table 2.3 (tables below).
-2. **Agreement with an alternative published equation**: Johnston et al. (2025). The two equations are closely
+Five kinds of evidence are kept separate:
+1. **Agreement with published tabulated values**: saturation vapour pressures printed in FAO-56 Annex 2,
+   Table 2.3 (first table below). Only these numbers are tabulated in a source.
+2. **Agreement with calculated benchmarks**: air VPD values for five temperature/RH cases, calculated from the
+   FAO-56 Eq. 11 constants and rounded to 4 d.p. They are **not** printed in FAO-56 Table 2.3. Agreement shows
+   that the code evaluates the equation as intended; it is not an independent measurement or source.
+3. **Comparison with an alternative published equation**: Johnston et al. (2025). The two equations are closely
    related empirical fits, so agreement shows consistency between formulations, not measurement accuracy.
-3. **Internal consistency**: forward/reverse round trips, monotonicity and limiting cases (automated tests).
-4. **Browser/interface tests**: the rendered app shows the expected numbers (automated tests).
+   The Johnston benchmark values are calculated from that equation (Eq. 2 of the paper); that they appear in the paper is not verified.
+4. **Internal consistency**: forward/reverse round trips, monotonicity and limiting cases (automated tests).
+5. **Browser/interface tests**: the rendered app shows the expected numbers (automated tests).
 
 None of these are experimental measurements.
 """
@@ -538,13 +574,13 @@ None of these are experimental measurements.
         st.dataframe(validation.alternative_equation_comparison(), hide_index=True, width="stretch",
                      key="val_alt_table",
                      column_config={c: st.column_config.NumberColumn(format="%.4f")
-                                    for c in ("Johnston reference VPD (kPa)", "Johnston equation, computed (kPa)",
+                                    for c in ("Johnston calculated benchmark VPD (kPa)", "Johnston equation, computed (kPa)",
                                               "Application VPD (kPa)")} |
                                    {"Application - Johnston (kPa)": st.column_config.NumberColumn(format="%.5f")})
         mx = validation.max_abs_differences()
         st.caption(
             f"Largest absolute differences: es vs FAO-56 table {mx['es_vs_FAO_table']:.5f} kPa; "
-            f"VPD vs FAO-56 reference {mx['vpd_vs_FAO_reference']:.5f} kPa; "
+            f"VPD vs calculated FAO-56 benchmark {mx['vpd_vs_FAO56_benchmark']:.5f} kPa; "
             f"application vs Johnston equation {mx['application_vs_Johnston_equation']:.5f} kPa. "
             "The equations differ slightly because their saturation-vapour-pressure coefficients differ.")
 
@@ -571,21 +607,24 @@ None of these are experimental measurements.
             g1, g2 = st.columns(2)
             g1.download_button("Download VPD-vs-RH numerical results (CSV)", to_csv(curves),
                                "vpd_vs_rh_reference.csv", "text/csv", key="dl_val_csv")
+            # Every input of the exported figure: the selected temperatures and the Johnston overlay.
+            val_sig = (tuple(sorted(val_temps)), bool(val_alt))
             if g2.button("Prepare VPD-vs-RH graph (PNG)", key="val_png_prepare"):
-                st.session_state["val_png"] = mpl_export.to_bytes(
-                    mpl_export.reference_mpl(curves, val_alt), "png", 200)
-            if "val_png" in st.session_state:
-                g2.download_button("Download VPD-vs-RH graph (PNG)", st.session_state["val_png"],
+                st.session_state["val_png"] = (val_sig, mpl_export.to_bytes(
+                    mpl_export.reference_mpl(curves, val_alt), "png", 200))
+            if "val_png" in st.session_state and st.session_state["val_png"][0] == val_sig:
+                g2.download_button("Download VPD-vs-RH graph (PNG)", st.session_state["val_png"][1],
                                    "vpd_vs_rh.png", "image/png", key="dl_val_png")
 
         st.markdown("#### D. Validation table")
-        st.caption("Air VPD from the production function vs the FAO-56 reference values "
-                   f"(reference rounded to 4 d.p.; tolerance ±{validation.TOL_VPD_KPA:.4f} kPa). "
+        st.caption("Air VPD from the production function vs benchmarks calculated from the FAO-56 equation "
+                   "(calculated values, not tabulated in FAO-56; rounded to 4 d.p.; "
+                   f"tolerance ±{validation.TOL_VPD_KPA:.4f} kPa). "
                    "Values are compared at full precision before formatting. Outcomes are evaluated now, "
                    "when this page is rendered.")
         st.dataframe(validation.vpd_comparison(), hide_index=True, width="stretch", key="val_vpd_table",
                      column_config={c: st.column_config.NumberColumn(format="%.4f")
-                                    for c in ("FAO-56 reference VPD (kPa)", "Application VPD (kPa)")} |
+                                    for c in ("FAO-56 calculated benchmark VPD (kPa)", "Application VPD (kPa)")} |
                                    {"Difference (kPa)": st.column_config.NumberColumn(format="%.5f")})
         with st.expander("Inspect an additional example"):
             e1, e2 = st.columns(2)
@@ -597,5 +636,5 @@ None of these are experimental measurements.
                          column_config={c: st.column_config.NumberColumn(format="%.4f")
                                         for c in ("Application VPD (kPa)", "Johnston equation VPD (kPa)")} |
                                        {"Application - Johnston (kPa)": st.column_config.NumberColumn(format="%.5f")})
-            st.caption("No published reference value exists for arbitrary inputs, so this example is compared "
+            st.caption("No tabulated benchmark exists for arbitrary inputs, so this example is compared "
                        "with the alternative equation only.")

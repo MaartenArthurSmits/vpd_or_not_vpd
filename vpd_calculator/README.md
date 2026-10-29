@@ -46,7 +46,7 @@ python -m pytest
 | `rscript.py` | Reproducible R script export (calculation + ggplot2 heatmap) |
 | `share.py` | Shareable-link (URL query parameter) encoding |
 | `citation.py` | Software citation strings |
-| `validation.py` | Reference values and comparisons shown in the validation section |
+| `validation.py` | Published table values, calculated benchmarks and comparisons shown in the validation section |
 | `tests/` | pytest suite (science, AppTest, Playwright e2e, export validation) |
 | `scripts/` | CI helper scripts |
 

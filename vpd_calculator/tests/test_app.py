@@ -6,8 +6,10 @@ from pathlib import Path
 import pytest
 from streamlit.testing.v1 import AppTest
 
+import mpl_export
 import presets
 import share
+import validation
 import vpd
 
 pytestmark = pytest.mark.apptest
@@ -342,10 +344,22 @@ def test_validation_tables_render_with_computed_outcomes():
     at = new_app().run()
     assert not at.exception
     t = tables(at)
-    vpd_table = next(v for k, v in t.items() if "Validation outcome" in k)
-    assert len(vpd_table) == 5 and (vpd_table["Validation outcome"] == "Within tolerance").all()
+    vpd_table = next(v for k, v in t.items() if "Outcome (vs calculated benchmark)" in k)
+    assert len(vpd_table) == 5 and (vpd_table["Outcome (vs calculated benchmark)"] == "Within tolerance").all()
     es_table = next(v for k, v in t.items() if "Published es (kPa)" in k)
     assert len(es_table) == 7 and (es_table["Outcome"] == "Within tolerance").all()
+
+
+def test_validation_labels_separate_published_from_calculated_benchmarks():
+    at = new_app().run()
+    cols = [c for df in at.dataframe for c in df.value.columns]
+    assert "Published es (kPa)" in cols                                       # only Table 2.3 is "published"
+    assert "FAO-56 calculated benchmark VPD (kPa)" in cols
+    assert "Johnston calculated benchmark VPD (kPa)" in cols
+    assert not any("reference VPD" in c or "published reference" in c for c in cols), cols
+    body = " ".join(m.value for m in at.markdown) + " ".join(c.value for c in at.caption)
+    assert "calculated benchmarks" in body and "not** printed in FAO-56 Table 2.3" in body
+    assert "calculated benchmark" in body and "published reference" not in body
 
 
 def test_validation_plot_controls():
@@ -366,3 +380,307 @@ def test_every_tab_renders_after_a_full_interaction_sequence():
     at.selectbox(key="dn_preset_day").set_value("Flowering").run()
     at.checkbox(key="val_johnston").set_value(True).run()
     assert not at.exception
+
+
+# ---- single-value (point) targets: equal lower and upper limits -----------------------------------
+def point_target_app(value=1.0):
+    at = new_app().run()
+    set_num(at, "vpd_hi", max(value, at.session_state["vpd_hi"]))
+    set_num(at, "vpd_lo", value)
+    set_num(at, "vpd_hi", value)
+    assert at.session_state["vpd_lo"] == at.session_state["vpd_hi"] == value
+    return at
+
+
+def texts(elements):
+    return [e.value for e in elements]
+
+
+def test_point_target_labels_and_single_rh_value():
+    at = point_target_app(1.0)
+    assert not at.exception
+    assert any("Target air VPD: 1.0 kPa" in v for v in texts(at.markdown))
+    m = metric_starting(at, "Required RH for air VPD 1.0 kPa")
+    assert m.label == "Required RH for air VPD 1.0 kPa at 22.0 °C"
+    assert m.value == f"{vpd.rh_for_air_vpd(22, 1.0):.1f} %" and " - " not in m.value
+    assert not any(x.label.startswith("RH range for") for x in at.metric)
+    assert not any("1.0-1.0" in v for v in texts(at.markdown) + texts(at.success) + texts(at.warning))
+
+
+def test_point_target_uses_leaf_wording_for_leaf_basis():
+    at = point_target_app(1.0)
+    at.radio(key="interval_kind").set_value("Leaf VPD").run()
+    assert any("Target leaf VPD: 1.0 kPa" in v for v in texts(at.markdown))
+    assert metric_starting(at, "Required RH for leaf VPD 1.0 kPa").value.endswith(" %")
+
+
+@pytest.mark.parametrize("rh,word", [(60.0, "above target"), (80.0, "below target")])
+def test_point_target_below_and_above_wording(rh, word):
+    at = point_target_app(1.0)
+    set_num(at, "rh", rh)
+    assert any(word in v for v in texts(at.warning)), texts(at.warning)
+    assert not any("the range" in v for v in texts(at.warning) + texts(at.success))
+
+
+def test_point_target_at_25c_reverse_calculation_is_at_target():
+    at = new_app().run()
+    at.radio(key="mode").set_value(share.MODE_B).run()
+    set_num(at, "t_air", 25.0)
+    set_num(at, "target_vpd", 1.0)
+    set_num(at, "vpd_hi", 1.0)
+    set_num(at, "vpd_lo", 1.0)
+    assert not at.exception
+    assert vpd.calculate_required_rh(25, 1.0, vpd.AIR).vpd_air > 1.0          # floating-point overshoot
+    assert any("at target" in v for v in texts(at.success)), (texts(at.success), texts(at.warning))
+    assert not any("above target" in v for v in texts(at.warning))
+
+
+def test_unequal_range_wording_is_unchanged():
+    at = new_app().run()
+    set_num(at, "vpd_lo", 0.8)
+    set_num(at, "vpd_hi", 1.2)
+    assert any("inside the range 0.8-1.2 kPa" in v for v in texts(at.success))
+    m = metric_starting(at, "RH range for air VPD 0.8-1.2 kPa")
+    assert " - " in m.value and m.value.endswith(" %")
+    assert not any("Target air VPD:" in v for v in texts(at.markdown))
+    assert not any("at target" in v for v in texts(at.success) + texts(at.warning))
+
+
+def test_unattainable_point_target_shows_single_value_error():
+    at = point_target_app(5.0)
+    errors = texts(at.error)
+    assert any("No RH between 0 and 100 % gives a air VPD of 5.0 kPa" in e and " to " not in e for e in errors), errors
+    assert not any(m.label.startswith(("Required RH for", "RH range for")) for m in at.metric)
+
+
+def test_day_and_night_point_targets_use_single_value_display():
+    at = new_app().run()
+    at.selectbox(key="dn_preset_day").set_value("Vegetative").run()      # day 1.0-1.0 kPa
+    assert not at.exception
+    m = metric_starting(at, "Day required RH for air VPD 1.0 kPa")
+    assert " - " not in m.value and m.value.endswith(" %")
+    assert any("Day target air VPD: 1.0 kPa" in v for v in texts(at.markdown))
+    # night preset for Vegetative is a genuine range and keeps the range display
+    at.selectbox(key="dn_preset_night").set_value("Vegetative").run()
+    n = metric_starting(at, "Night RH range for air VPD 0.8-1.2 kPa")
+    assert " - " in n.value
+
+
+def test_day_point_target_unattainable():
+    at = new_app().run()
+    set_num(at, "dn_hi_day", 5.0)
+    set_num(at, "dn_lo_day", 5.0)
+    assert any("Day: no RH between 0 and 100 % gives a air VPD of 5.0 kPa" in e for e in texts(at.error))
+
+
+# ---- validation-plot PNG cache: a download must match the displayed graph --------------------------
+VAL_DL_LABEL = "Download VPD-vs-RH graph (PNG)"
+
+
+def val_png_offered(at):
+    return any(getattr(b.proto, "label", "") == VAL_DL_LABEL for b in at.get("download_button"))
+
+
+def val_png_expected(temps, johnston):
+    curves = validation.reference_curves(sorted(temps))
+    return mpl_export.to_bytes(mpl_export.reference_mpl(curves, johnston), "png", 200)
+
+
+def prepare_val_png(at):
+    at.button(key="val_png_prepare").click().run()
+    assert not at.exception
+    return at.session_state["val_png"][1]
+
+
+def test_val_png_expected_render_is_deterministic():
+    assert val_png_expected([20, 25], False) == val_png_expected([20, 25], False)
+    assert val_png_expected([20, 25], False) != val_png_expected([20, 25], True)
+    assert val_png_expected([20, 25], False) != val_png_expected([20, 30], False)
+
+
+def test_val_png_not_offered_until_prepared_then_kept_on_unchanged_rerun():
+    at = new_app().run()
+    assert not val_png_offered(at)
+    png = prepare_val_png(at)
+    assert val_png_offered(at) and png == val_png_expected([20, 25, 30], False)
+    at.run()                                                                      # ordinary rerun
+    set_num(at, "t_air", 24.0)                                                    # unrelated input
+    assert val_png_offered(at) and at.session_state["val_png"][1] == png
+
+
+def test_val_png_invalidated_when_temperatures_change_and_regenerated_with_new_inputs():
+    at = new_app().run()
+    old = prepare_val_png(at)
+    at.multiselect(key="val_temps").set_value([10, 35]).run()
+    assert not at.exception and not val_png_offered(at)
+    new = prepare_val_png(at)
+    assert val_png_offered(at)
+    assert new == val_png_expected([10, 35], False) and new != old
+    assert at.session_state["val_png"][0] == ((10, 35), False)
+
+
+def test_val_png_invalidated_when_johnston_overlay_changes_and_regenerated():
+    at = new_app().run()
+    old = prepare_val_png(at)
+    at.checkbox(key="val_johnston").set_value(True).run()
+    assert not at.exception and not val_png_offered(at)
+    new = prepare_val_png(at)
+    assert val_png_offered(at)
+    assert new == val_png_expected([20, 25, 30], True) and new != old
+    at.checkbox(key="val_johnston").set_value(False).run()                        # back to the old setting
+    assert not val_png_offered(at)                                                # cache holds the Johnston image
+
+
+def test_val_png_temperature_order_does_not_invalidate():
+    at = new_app().run()
+    png = prepare_val_png(at)
+    at.multiselect(key="val_temps").set_value([30, 20, 25]).run()
+    assert val_png_offered(at) and at.session_state["val_png"][1] == png
+
+
+def test_val_png_clearing_temperatures_hides_download_without_error():
+    at = new_app().run()
+    prepare_val_png(at)
+    at.multiselect(key="val_temps").set_value([]).run()
+    assert not at.exception and not val_png_offered(at)
+    assert any("at least one temperature" in i.value for i in at.info)
+    at.multiselect(key="val_temps").set_value([15]).run()                          # a different selection
+    assert not at.exception and not val_png_offered(at)
+    assert prepare_val_png(at) == val_png_expected([15], False)
+
+
+# ---- day/night settings in shareable links ---------------------------------------------------------
+def es_hand(t):                                  # stand-alone FAO-56 Eq. 11, independent of production code
+    import math
+    return 0.6108 * math.exp(17.27 * t / (t + 237.3))
+
+
+ACCEPTANCE = {"dt": "33", "doff": "-2", "dlo": "1.0", "dhi": "1.0", "dk": "leaf", "dp": "veg",
+              "nt": "17", "noff": "1", "nlo": "0.6", "nhi": "1.0", "nk": "air", "np": "seed"}
+
+
+def app_with_params(params):
+    at = new_app()
+    for k, v in params.items():
+        at.query_params[k] = v
+    return at.run()
+
+
+def qp(at, key):
+    v = at.query_params[key]
+    return v[0] if isinstance(v, list) else v
+
+
+def test_day_night_link_restores_controls_and_rh_results_in_fresh_session():
+    at = app_with_params(ACCEPTANCE)
+    assert not at.exception
+    s = at.session_state
+    # controls
+    assert at.number_input(key="dn_t_day__num").value == 33.0
+    assert at.number_input(key="dn_off_day__num").value == -2.0
+    assert at.number_input(key="dn_lo_day__num").value == 1.0 == at.number_input(key="dn_hi_day__num").value
+    assert at.radio(key="dn_kind_day").value == share.LEAF_LABEL
+    assert at.selectbox(key="dn_preset_day").value == "Vegetative"
+    assert at.selectbox(key="dn_offset_preset_day").value == "-2 °C"
+    assert at.number_input(key="dn_t_night__num").value == 17.0
+    assert at.number_input(key="dn_off_night__num").value == 1.0
+    assert at.number_input(key="dn_lo_night__num").value == 0.6
+    assert at.number_input(key="dn_hi_night__num").value == 1.0
+    assert at.radio(key="dn_kind_night").value == share.AIR_LABEL
+    assert at.selectbox(key="dn_preset_night").value == "Seedlings / propagation"
+    assert at.selectbox(key="dn_offset_preset_night").value == "+1 °C"
+    # calculated results (hand-computed with a stand-alone equation)
+    day_rh = 100 * (es_hand(33 - 2) - 1.0) / es_hand(33)
+    m = metric_starting(at, "Day required RH for leaf VPD 1.0 kPa at 33.0 °C")
+    assert m.value == f"{day_rh:.1f} %"
+    rh_lo, rh_hi = 100 * (1 - 1.0 / es_hand(17)), 100 * (1 - 0.6 / es_hand(17))
+    n = metric_starting(at, "Night RH range for air VPD 0.6-1.0 kPa at 17.0 °C")
+    assert n.value == f"{rh_lo:.1f} - {rh_hi:.1f} %"
+    # the main calculator is untouched
+    assert (s["t_air"], s["rh"], s["vpd_lo"], s["vpd_hi"], s["calc_offset"]) == (22.0, 60.0, 0.8, 1.2, 0.0)
+    assert metric(at, "Air VPD") == "1.1 kPa"
+
+
+def test_share_link_restores_preset_identity_and_custom_status():
+    # Vegetative night and General horticulture night share the range 0.8-1.2 kPa.
+    at = app_with_params({"nlo": "0.8", "nhi": "1.2", "np": "veg", "dlo": "0.9", "dhi": "1.3", "dp": "custom"})
+    assert not at.exception
+    assert at.selectbox(key="dn_preset_night").value == "Vegetative"
+    assert at.selectbox(key="dn_preset_day").value == "Custom"
+    assert (at.session_state["dn_lo_night"], at.session_state["dn_hi_night"]) == (0.8, 1.2)   # limits not overwritten
+    assert (at.session_state["dn_lo_day"], at.session_state["dn_hi_day"]) == (0.9, 1.3)
+    at2 = app_with_params({"nlo": "0.8", "nhi": "1.2", "np": "gen"})
+    assert at2.selectbox(key="dn_preset_night").value == "General horticulture"
+
+
+def test_inconsistent_or_unknown_preset_does_not_overwrite_saved_limits():
+    at = app_with_params({"dlo": "0.8", "dhi": "1.2", "dp": "flow", "nlo": "0.7", "nhi": "1.1", "np": "nonsense"})
+    assert not at.exception
+    s = at.session_state
+    assert (s["dn_lo_day"], s["dn_hi_day"], s["dn_lo_night"], s["dn_hi_night"]) == (0.8, 1.2, 0.7, 1.1)
+    assert s["dn_preset_day"] == "General horticulture" and s["dn_preset_night"] == "Custom"
+
+
+def test_legacy_link_keeps_day_night_defaults_and_old_presets():
+    at = app_with_params({"m": "a", "t": "25", "rh": "40", "lo": "1.2", "hi": "1.5"})
+    assert not at.exception
+    s = at.session_state
+    assert (s["dn_t_day"], s["dn_t_night"], s["dn_off_day"], s["dn_off_night"]) == (22.0, 17.0, 0.0, 0.0)
+    assert (s["dn_lo_day"], s["dn_hi_day"], s["dn_lo_night"], s["dn_hi_night"]) == (0.8, 1.2, 0.8, 1.2)
+    assert at.radio(key="dn_kind_day").value == share.AIR_LABEL
+    assert s["dn_preset_day"] == s["dn_preset_night"] == "General horticulture"
+    assert s["vpd_preset"] == "Flowering"
+
+
+@pytest.mark.parametrize("bad", [
+    {"dt": "abc", "nt": "nan", "doff": "inf", "noff": "-inf"},
+    {"dt": "999", "nt": "-999", "dlo": "-5", "nhi": "50"},
+    {"dk": "banana", "nk": "", "dp": "???", "np": "Vegetative"},
+    {"dt": "", "dlo": "1e999", "nlo": "0x10"},
+])
+def test_invalid_day_night_link_parameters_fall_back_to_defaults_without_error(bad):
+    at = app_with_params(bad)
+    assert not at.exception
+    s = at.session_state
+    assert (s["dn_t_day"], s["dn_t_night"], s["dn_off_day"], s["dn_off_night"]) == (22.0, 17.0, 0.0, 0.0)
+    assert (s["dn_lo_day"], s["dn_hi_day"], s["dn_lo_night"], s["dn_hi_night"]) == (0.8, 1.2, 0.8, 1.2)
+    assert at.radio(key="dn_kind_day").value == at.radio(key="dn_kind_night").value == share.AIR_LABEL
+
+
+def test_editing_day_night_settings_updates_url_and_leaves_other_period_and_main_untouched():
+    at = new_app().run()
+    set_num(at, "dn_t_day", 33.0)
+    set_num(at, "dn_off_day", -2.0)
+    at.radio(key="dn_kind_day").set_value(share.LEAF_LABEL).run()
+    at.selectbox(key="dn_preset_day").set_value("Vegetative").run()
+    assert (qp(at, "dt"), qp(at, "doff"), qp(at, "dk"), qp(at, "dp")) == ("33", "-2", "leaf", "veg")
+    assert (qp(at, "dlo"), qp(at, "dhi")) == ("1", "1")
+    assert (qp(at, "nt"), qp(at, "noff"), qp(at, "nk"), qp(at, "nlo"), qp(at, "nhi")) == ("17", "0", "air", "0.8", "1.2")
+    assert (qp(at, "t"), qp(at, "rh"), qp(at, "lo"), qp(at, "hi")) == ("22", "60", "0.8", "1.2")
+    set_num(at, "dn_hi_night", 1.5)
+    assert qp(at, "nhi") == "1.5" and qp(at, "np") == "custom" and qp(at, "dhi") == "1"
+    assert qp(at, "dt") == "33" and qp(at, "t") == "22"
+
+
+def test_app_url_round_trip_into_a_fresh_session():
+    at = new_app().run()
+    set_num(at, "dn_t_night", 18.5)
+    set_num(at, "dn_off_night", 1.0)
+    at.radio(key="dn_kind_night").set_value(share.LEAF_LABEL).run()
+    set_num(at, "dn_hi_night", 1.4)
+    set_num(at, "dn_lo_night", 1.4)
+    at.selectbox(key="dn_preset_day").set_value("Flowering").run()
+    link = {k: qp(at, k) for k in ("dt", "doff", "dlo", "dhi", "dk", "dp", "nt", "noff", "nlo", "nhi", "nk", "np")}
+    fresh = app_with_params(link)
+    assert not fresh.exception
+    for key in ("dn_t_day", "dn_off_day", "dn_lo_day", "dn_hi_day", "dn_preset_day", "dn_kind_day",
+                "dn_t_night", "dn_off_night", "dn_lo_night", "dn_hi_night", "dn_preset_night", "dn_kind_night"):
+        assert fresh.session_state[key] == at.session_state[key], key
+    assert fresh.selectbox(key="dn_preset_day").value == "Flowering"
+    assert fresh.selectbox(key="dn_preset_night").value == "Custom"
+
+
+def test_share_explanation_mentions_day_night_settings():
+    at = new_app().run()
+    text = " ".join(c.value for c in at.caption)
+    assert "independently for day and night" in text and "preset" in text

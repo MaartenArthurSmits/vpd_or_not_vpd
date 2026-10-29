@@ -42,6 +42,13 @@ def _heatmap_block(h: dict) -> list:
     if start - z.min() < 1e-9:      # a contour on the data minimum is only an edge artefact
         start += step
     label = "Air VPD" if kind == vpd.AIR else "Leaf VPD"
+    tkind = h.get("target_kind") or kind          # colours follow `kind`, the target follows `target_kind`
+    tlabel = "Air VPD" if tkind == vpd.AIR else "Leaf VPD"
+    subtitle_target = ""
+    if h.get("target") is not None:
+        lo_t, hi_t = h["target"]
+        subtitle_target = (("Dashed contour" if vpd.is_point_target(lo_t, hi_t) else "Dashed contours")
+                           + ": t" + vpd.target_label(tkind, lo_t, hi_t)[1:])      # "target Air VPD ..."
     scale = _R_SCALES.get(h.get("colorscale", "RdYlBu_r"), _R_SCALES["RdYlBu_r"])
 
     L = [
@@ -64,6 +71,12 @@ def _heatmap_block(h: dict) -> list:
         "                    rh = seq(hm_rh_min, hm_rh_max, by = 0.5))",
         "t_ref <- if (hm_kind == \"leaf\") grid$temperature + hm_offset else grid$temperature",
         "grid$vpd <- es(t_ref) - es(grid$temperature) * grid$rh / 100",
+    ]
+    if h.get("target") is not None:
+        L += [f"hm_target_kind <- \"{'air' if tkind == vpd.AIR else 'leaf'}\"    # VPD type the target refers to",
+              "t_ref_target <- if (hm_target_kind == \"leaf\") grid$temperature + hm_offset else grid$temperature",
+              "grid$vpd_target <- es(t_ref_target) - es(grid$temperature) * grid$rh / 100"]
+    L += [
         "",
         "p <- ggplot(grid, aes(x = temperature, y = rh)) +",
         "  geom_raster(aes(fill = vpd)) +",
@@ -72,7 +85,7 @@ def _heatmap_block(h: dict) -> list:
     ]
     if h.get("target") is not None:
         lo, hi = h["target"]
-        L += [f"  geom_contour(aes(z = vpd), breaks = unique(c({_num(lo)}, {_num(hi)})), colour = \"black\",",
+        L += [f"  geom_contour(aes(z = vpd_target), breaks = unique(c({_num(lo)}, {_num(hi)})), colour = \"black\",",
               "               linewidth = 0.9, linetype = \"dashed\") +"]
     if h.get("point") is not None:
         t, rh = h["point"]
@@ -84,6 +97,7 @@ def _heatmap_block(h: dict) -> list:
         "  labs(x = \"Air temperature (°C)\", y = \"Relative humidity (%)\",",
         f"       fill = \"{label} (kPa)\",",
         f"       title = \"{label} as a function of temperature and relative humidity\",",
+        *([f"       subtitle = \"{subtitle_target}\","] if h.get("target") is not None else []),
         "       caption = \"Saturation vapour pressure: FAO-56 (Allen et al., 1998), Eq. 11\") +",
         "  theme_minimal(base_size = 12)",
         "",
@@ -107,7 +121,8 @@ def build_r_script(mode_a: bool, t_air: float, rh: float, target_vpd: float, kin
 
     Output lines of the numerical part are 'name: value' so they can be compared with the app.
     `heatmap` keys: t_min, t_max, rh_min, rh_max, kind, offset, colorscale, contour_step, z_max,
-    target (low, high) or None, point (T, RH) or None.
+    target (low, high) or None, target_kind (VPD type of the target; default `kind`),
+    point (T, RH) or None.
     """
     L = [
         "# VPD calculation reproduced from the VPD Calculator",
@@ -154,7 +169,8 @@ def build_r_script(mode_a: bool, t_air: float, rh: float, target_vpd: float, kin
     ]
     if interval is not None and interval[0] <= interval[1]:
         lo, hi = interval
-        L += ["", f"# User-defined target {interval_kind} VPD range (kPa); not a validated optimum",
+        what = "target" if lo == hi else "target range"
+        L += ["", f"# User-defined {what} for {interval_kind} VPD (kPa); not a validated optimum",
               f"vpd_lo <- {_num(lo)}", f"vpd_hi <- {_num(hi)}"]
         if interval_kind == vpd.AIR:
             L += ["rh_at_vpd_lo <- 100 * (1 - vpd_lo / es(t_air))",
