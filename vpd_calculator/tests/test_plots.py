@@ -322,3 +322,28 @@ def test_treatment_markers_are_labelled_distinct_from_the_star_and_show_their_ow
     assert np.array_equal(np.asarray(fig.data[0].z), np.asarray(base.data[0].z))
     assert [t.name for t in fig.data if t.name != "Comparison treatments"] == [t.name for t in base.data]
     assert all(t.name != "Comparison treatments" for t in plots.heatmap_figure(10, 40, 20, 100).data)
+
+
+def test_coincident_treatment_and_selected_point_stay_identifiable():
+    shared = dict(MARKERS[0], offset=-2.0)                       # exactly at the selected point (22 degC, 60 % RH)
+    apart = MARKERS[1]
+    fig = plots.heatmap_figure(10, 40, 20, 100, vpd.LEAF, -2.0, point=(22, 60), treatments=[shared, apart])
+    (trace,) = [t for t in fig.data if t.name == "Comparison treatments"]
+    star = fig.data[-1]
+    assert star.name == "Selected" and fig.data.index(trace) < len(fig.data) - 1       # star drawn above the markers
+    assert list(trace.x) == [22.0, 33.0] and list(trace.y) == [60.0, 60.0]              # coordinates are not shifted
+    assert (star.x[0], star.y[0]) == (22, 60)
+    assert trace.marker.size[0] > star.marker.size > 0 and trace.marker.size[1] < trace.marker.size[0]
+    assert trace.textposition == ("bottom right", "top center")
+    for part in ("Selected", "Comparison treatment at this point", "<b>Cool</b>",
+                 "Leaf offset -2.0 °C, leaf 20.0 °C", f"Leaf VPD {vpd.vpd_leaf(22, 60, 20):.1f} kPa"):
+        assert part in star.hovertemplate
+    assert "Warm" not in star.hovertemplate and "Cool" in trace.hovertext[0] and "Warm" in trace.hovertext[1]
+
+
+def test_separated_treatment_and_star_keep_their_standard_presentation():
+    fig = plots.heatmap_figure(10, 40, 20, 100, vpd.LEAF, 0.0, point=(25, 50), treatments=MARKERS)
+    (trace,) = [t for t in fig.data if t.name == "Comparison treatments"]
+    star = fig.data[-1]
+    assert star.marker.size == 18 and list(trace.marker.size) == [14, 14] and set(trace.textposition) == {"top center"}
+    assert "Comparison treatment" not in star.hovertemplate
