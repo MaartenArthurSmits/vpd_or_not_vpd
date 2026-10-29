@@ -1,21 +1,113 @@
-"""Generate a self-contained, dependency-free R script that reproduces a calculator state."""
+"""Generate a self-contained R script reproducing the calculator state and (optionally) the heatmap.
+
+The numerical part uses base R only. The heatmap part needs ggplot2 (the `scales` package ships with
+it); contour labels are added when the optional `metR` package is installed.
+"""
 
 from __future__ import annotations
 
 from datetime import date
 
+import numpy as np
+
 import vpd
+
+# app colour scale -> ggplot2 fill scale
+_R_SCALES = {
+    "RdYlBu_r": 'scale_fill_distiller(palette = "RdYlBu", direction = -1, limits = zlim, oob = scales::squish)',
+    "Viridis": 'scale_fill_viridis_c(option = "D", limits = zlim, oob = scales::squish)',
+    "Turbo": 'scale_fill_viridis_c(option = "H", limits = zlim, oob = scales::squish)',
+    "Cividis": 'scale_fill_viridis_c(option = "E", limits = zlim, oob = scales::squish)',
+    "Plasma": 'scale_fill_viridis_c(option = "C", limits = zlim, oob = scales::squish)',
+    "YlGnBu": 'scale_fill_distiller(palette = "YlGnBu", direction = 1, limits = zlim, oob = scales::squish)',
+    "Spectral_r": 'scale_fill_distiller(palette = "Spectral", direction = -1, limits = zlim, oob = scales::squish)',
+    "Greys": 'scale_fill_distiller(palette = "Greys", direction = 1, limits = zlim, oob = scales::squish)',
+}
 
 
 def _num(x) -> str:
     return repr(float(x))
 
 
-def build_r_script(mode_a: bool, t_air: float, rh: float, target_vpd: float, kind: str,
-                   t_leaf: float, interval=None, interval_kind: str = vpd.AIR) -> str:
-    """R script (base R only) reproducing the current calculation.
+def _heatmap_block(h: dict) -> list:
+    kind = h.get("kind", vpd.AIR)
+    offset = float(h.get("offset", 0.0))
+    step = float(h.get("contour_step", 0.5))
+    temps = np.arange(h["t_min"], h["t_max"] + 1e-9, 0.25)
+    rhs = np.arange(h["rh_min"], h["rh_max"] + 1e-9, 0.5)
+    z = vpd.vpd_matrix(temps, rhs, kind, offset)
+    zlo = float(np.floor(z.min() * 2) / 2) if z.min() < 0 else 0.0
+    zhi = float(h["z_max"]) if h.get("z_max") else float(z.max())
+    start = float(np.ceil(z.min() / step) * step)
+    if start - z.min() < 1e-9:      # a contour on the data minimum is only an edge artefact
+        start += step
+    label = "Air VPD" if kind == vpd.AIR else "Leaf VPD"
+    scale = _R_SCALES.get(h.get("colorscale", "RdYlBu_r"), _R_SCALES["RdYlBu_r"])
 
-    Output lines are 'name: value' so they are easy to compare with the app.
+    L = [
+        "",
+        "# =====================================================================",
+        "# Heatmap (reproduces the app's VPD heatmap; requires ggplot2)",
+        "# =====================================================================",
+        "library(ggplot2)",
+        "",
+        f"hm_t_min  <- {_num(h['t_min'])}    # temperature range (degC)",
+        f"hm_t_max  <- {_num(h['t_max'])}",
+        f"hm_rh_min <- {_num(h['rh_min'])}    # relative humidity range (%)",
+        f"hm_rh_max <- {_num(h['rh_max'])}",
+        f"hm_kind   <- \"{'air' if kind == vpd.AIR else 'leaf'}\"    # VPD type: \"air\" or \"leaf\"",
+        f"hm_offset <- {_num(offset)}    # leaf temperature offset (degC), used when hm_kind == \"leaf\"",
+        f"zlim      <- c({_num(zlo)}, {_num(zhi)})    # colour scale limits (kPa)",
+        f"contour_breaks <- seq({_num(start)}, {_num(zhi)}, by = {_num(step)})",
+        "",
+        "grid <- expand.grid(temperature = seq(hm_t_min, hm_t_max, by = 0.25),",
+        "                    rh = seq(hm_rh_min, hm_rh_max, by = 0.5))",
+        "t_ref <- if (hm_kind == \"leaf\") grid$temperature + hm_offset else grid$temperature",
+        "grid$vpd <- es(t_ref) - es(grid$temperature) * grid$rh / 100",
+        "",
+        "p <- ggplot(grid, aes(x = temperature, y = rh)) +",
+        "  geom_raster(aes(fill = vpd)) +",
+        f"  {scale} +",
+        "  geom_contour(aes(z = vpd), breaks = contour_breaks, colour = \"black\", alpha = 0.55, linewidth = 0.3) +",
+    ]
+    if h.get("target") is not None:
+        lo, hi = h["target"]
+        L += [f"  geom_contour(aes(z = vpd), breaks = unique(c({_num(lo)}, {_num(hi)})), colour = \"black\",",
+              "               linewidth = 0.9, linetype = \"dashed\") +"]
+    if h.get("point") is not None:
+        t, rh = h["point"]
+        if h["t_min"] <= t <= h["t_max"] and h["rh_min"] <= rh <= h["rh_max"]:
+            L += [f"  annotate(\"point\", x = {_num(t)}, y = {_num(rh)}, shape = 21, size = 5,",
+                  "           fill = \"white\", colour = \"black\", stroke = 1.2) +"]
+    L += [
+        "  coord_cartesian(expand = FALSE) +",
+        "  labs(x = \"Air temperature (°C)\", y = \"Relative humidity (%)\",",
+        f"       fill = \"{label} (kPa)\",",
+        f"       title = \"{label} as a function of temperature and relative humidity\",",
+        "       caption = \"Saturation vapour pressure: FAO-56 (Allen et al., 1998), Eq. 11\") +",
+        "  theme_minimal(base_size = 12)",
+        "",
+        "# Optional contour labels if the metR package is available",
+        "if (requireNamespace(\"metR\", quietly = TRUE)) {",
+        "  p <- p + metR::geom_text_contour(aes(z = vpd), breaks = contour_breaks, size = 2.8, stroke = 0.15)",
+        "}",
+        "",
+        "# High-resolution exports (written to the working directory)",
+        "ggsave(\"vpd_heatmap.png\", p, width = 10, height = 6.5, dpi = 300)",
+        "ggsave(\"vpd_heatmap.pdf\", p, width = 10, height = 6.5)",
+        "cat(\"heatmap_files: vpd_heatmap.png, vpd_heatmap.pdf\\n\")",
+    ]
+    return L
+
+
+def build_r_script(mode_a: bool, t_air: float, rh: float, target_vpd: float, kind: str,
+                   t_leaf: float, interval=None, interval_kind: str = vpd.AIR,
+                   heatmap: dict | None = None) -> str:
+    """R script reproducing the current calculation and, if `heatmap` is given, the heatmap.
+
+    Output lines of the numerical part are 'name: value' so they can be compared with the app.
+    `heatmap` keys: t_min, t_max, rh_min, rh_max, kind, offset, colorscale, contour_step, z_max,
+    target (low, high) or None, point (T, RH) or None.
     """
     L = [
         "# VPD calculation reproduced from the VPD Calculator",
@@ -62,7 +154,7 @@ def build_r_script(mode_a: bool, t_air: float, rh: float, target_vpd: float, kin
     ]
     if interval is not None and interval[0] <= interval[1]:
         lo, hi = interval
-        L += ["", f"# User-defined target {interval_kind} VPD interval (kPa); not a validated optimum",
+        L += ["", f"# User-defined target {interval_kind} VPD range (kPa); not a validated optimum",
               f"vpd_lo <- {_num(lo)}", f"vpd_hi <- {_num(hi)}"]
         if interval_kind == vpd.AIR:
             L += ["rh_at_vpd_lo <- 100 * (1 - vpd_lo / es(t_air))",
@@ -72,12 +164,12 @@ def build_r_script(mode_a: bool, t_air: float, rh: float, target_vpd: float, kin
                   "rh_at_vpd_hi <- 100 * (es(t_leaf) - vpd_hi) / es(t_air)"]
         L += ["cat(sprintf('rh_range_unclipped: %.6f to %.6f\\n', rh_at_vpd_hi, rh_at_vpd_lo))"]
 
-    # Expected values from the app, for cross-checking the R output
     if mode_a:
         r = vpd.calculate_vpd(t_air, rh, measured_leaf=t_leaf)
     else:
         r = vpd.calculate_required_rh(t_air, target_vpd, kind, measured_leaf=t_leaf)
     L += ["", "# Values computed by the app at export time:",
-          f"# vpd_air: {r.vpd_air:.6f}", f"# vpd_leaf: {r.vpd_leaf:.6f}",
-          f"# rh: {(r.rh):.6f}", ""]
-    return "\n".join(L)
+          f"# vpd_air: {r.vpd_air:.6f}", f"# vpd_leaf: {r.vpd_leaf:.6f}", f"# rh: {r.rh:.6f}"]
+    if heatmap is not None:
+        L += _heatmap_block(heatmap)
+    return "\n".join(L) + "\n"

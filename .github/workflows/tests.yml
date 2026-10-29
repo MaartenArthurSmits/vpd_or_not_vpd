@@ -27,8 +27,8 @@ jobs:
         run: pip install -r requirements-dev.txt
       - name: Install Playwright Chromium
         run: python -m playwright install --with-deps chromium
-      - name: Install Chrome for Plotly PNG export (kaleido)
-        run: python -c "import kaleido; kaleido.get_chrome_sync()"
+      - name: Install ggplot2 for the R-script tests
+        run: Rscript -e 'install.packages("ggplot2", repos = "https://cloud.r-project.org")'
       - run: mkdir -p tests/artifacts
 
       - name: 1. Scientific and unit tests

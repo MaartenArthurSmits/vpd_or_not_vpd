@@ -5,6 +5,7 @@ type: software
 authors:
   - given-names: "Maarten Arthur"
     family-names: "Smits"
+    orcid: "https://orcid.org/0009-0004-1315-0822"
 repository-code: "https://github.com/MaartenArthurSmits/vpd_or_not_vpd"
 url: "https://vpd-or-not-vpd.streamlit.app/"
 license: MIT

@@ -92,16 +92,6 @@ def test_rh_range_orientation_and_clipping():
     assert not vpd.rh_range_for_vpd_range(22, 4.0, 5.0)["attainable"]
 
 
-def test_treatment_table_same_target_vpd():
-    df = vpd.treatment_table(vpd.TREATMENTS, "vpd", 1.0, 0.6)
-    assert len(df) == 8
-    day = df[df.Period == "Day"]
-    assert np.allclose(day["Air VPD (kPa)"], 1.0)
-    # warmer treatments need higher RH for the same VPD
-    assert day.set_index("Treatment").loc["Warming 1", "RH (%)"] > \
-        day.set_index("Treatment").loc["Control 1", "RH (%)"]
-
-
 def test_grid_and_matrix_agree():
     g = vpd.vpd_grid(15, 30, 40, 90, 5, 10, offset=-2)
     m = vpd.vpd_matrix(np.arange(15, 31, 5), np.arange(40, 91, 10), vpd.LEAF, -2)

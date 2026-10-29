@@ -221,43 +221,11 @@ def vpd_matrix(temps, rhs, kind: str = AIR, offset: float = 0.0) -> np.ndarray:
     return saturation_vapour_pressure(t_ref) - ea
 
 
-# --------------------------------------------------------------------------
-# Day / night treatments
-# --------------------------------------------------------------------------
-TREATMENTS = {
-    "Control 1": (22.0, 22.0),
-    "Control 2": (22.0, 17.0),
-    "Warming 1": (33.0, 33.0),
-    "Warming 2": (33.0, 28.0),
-}
+def condensation_rh(t_air, t_leaf=None):
+    """RH (%) at which leaf VPD reaches zero: 100 * es(T_leaf) / es(T_air).
 
-
-def treatment_table(treatments: dict, mode: str, value_day: float, value_night: float,
-                    kind: str = AIR, offset_day: float = 0.0,
-                    offset_night: float = 0.0) -> pd.DataFrame:
-    """Compare treatments.
-
-    mode='rh'  : value_* are RH (%) -> VPD is computed.
-    mode='vpd' : value_* are target VPD (kPa) -> required RH is computed
-                 (so the same target is held across temperature treatments).
+    Above this RH the leaf VPD is negative and condensation on the leaf is possible. For a leaf
+    warmer than or equal to the air the value is >= 100 %, so condensation is not expected.
     """
-    rows = []
-    for name, (td, tn) in treatments.items():
-        for period, t, val, off in (("Day", td, value_day, offset_day),
-                                    ("Night", tn, value_night, offset_night)):
-            if mode == "rh":
-                r = calculate_vpd(t, val, off)
-                rows.append({"Treatment": name, "Period": period, "Temperature (°C)": t,
-                             "Leaf temperature (°C)": r.t_leaf, "RH (%)": val,
-                             "Air VPD (kPa)": r.vpd_air, "Leaf VPD (kPa)": r.vpd_leaf,
-                             "Attainable": 0 <= val <= 100, "Note": "; ".join(r.warnings)})
-            elif mode == "vpd":
-                r = calculate_required_rh(t, val, kind, off)
-                rows.append({"Treatment": name, "Period": period, "Temperature (°C)": t,
-                             "Leaf temperature (°C)": r.t_leaf, f"Target {kind} VPD (kPa)": val,
-                             "RH (%)": r.rh, "Air VPD (kPa)": r.vpd_air,
-                             "Leaf VPD (kPa)": r.vpd_leaf, "Attainable": r.attainable,
-                             "Note": r.message if not r.attainable else "; ".join(r.warnings)})
-            else:
-                raise ValueError("mode must be 'rh' or 'vpd'")
-    return pd.DataFrame(rows)
+    t_leaf = t_air if t_leaf is None else t_leaf
+    return 100.0 * saturation_vapour_pressure(t_leaf) / saturation_vapour_pressure(t_air)

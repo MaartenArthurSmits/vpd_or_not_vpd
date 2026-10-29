@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import logger_data  # noqa: E402
+import mpl_export  # noqa: E402
 import plots  # noqa: E402
 import vpd  # noqa: E402
 
@@ -61,16 +61,48 @@ def test_vpd_vs_rh_figure():
     assert len(fig.layout.shapes) >= 1  # shaded RH range
 
 
-def test_treatment_figure_trace_count():
-    df = vpd.treatment_table(vpd.TREATMENTS, "vpd", 1.0, 0.6)
-    fig = plots.treatment_figure(df)
-    assert len(fig.data) == 6
-    assert isinstance(fig, go.Figure)
+# ---- Matplotlib (Agg) static export: no browser needed ----------------------------------
+def png_size(data: bytes):
+    import struct
+    return struct.unpack(">II", data[16:24])
 
 
-def test_timeseries_figure():
-    clean, _ = logger_data.load_logger_data(
-        logger_data.example_data(), "timestamp", "air_temp_C", "RH_percent")
-    fig = plots.timeseries_figure(clean, interval=(0.8, 1.2))
-    assert len(fig.data) == 4
-    assert len(fig.layout.shapes) == 1
+def test_mpl_heatmap_png_and_pdf_without_browser():
+    fig = mpl_export.heatmap_mpl(10, 40, 10, 100, vpd.LEAF, -2.0, point=(22, 60), target=(0.8, 1.2))
+    png = mpl_export.to_bytes(fig, "png", 100)
+    pdf = mpl_export.to_bytes(fig, "pdf")
+    assert png[:8] == b"\x89PNG\r\n\x1a\n" and len(png) > 10_000
+    assert pdf[:5] == b"%PDF-" and len(pdf) > 5_000
+
+
+def test_mpl_png_is_300_dpi_publication_size():
+    fig = mpl_export.heatmap_mpl(10, 40, 10, 100, figsize=(10.0, 6.5))
+    assert png_size(mpl_export.to_bytes(fig, "png", 300)) == (3000, 1950)
+
+
+def test_mpl_heatmap_axes_labels_and_limits():
+    fig = mpl_export.heatmap_mpl(12, 38, 20, 90, vpd.AIR)
+    ax = fig.axes[0]
+    assert ax.get_xlabel() == "Air temperature (°C)" and ax.get_ylabel() == "Relative humidity (%)"
+    assert ax.get_xlim() == (12, 38) and ax.get_ylim() == (20, 90)
+    assert "Air VPD" in ax.get_title()
+    assert any("VPD" in a.get_ylabel() for a in fig.axes)          # colourbar label
+
+
+def test_mpl_selected_point_only_inside_range():
+    inside = mpl_export.heatmap_mpl(10, 40, 10, 100, point=(22, 60))
+    outside = mpl_export.heatmap_mpl(10, 40, 10, 100, point=(50, 60))
+    assert len(inside.axes[0].lines) == 1 and len(outside.axes[0].lines) == 0
+
+
+def test_mpl_reference_figure_png():
+    import validation
+    curves = validation.reference_curves([20, 25, 30])
+    fig = mpl_export.reference_mpl(curves, show_johnston=True)
+    assert len(fig.axes[0].lines) == 6
+    assert mpl_export.to_bytes(fig, "png", 100)[:4] == b"\x89PNG"
+
+
+def test_interface_plots_use_one_decimal_hover():
+    fig = plots.heatmap_figure(10, 40, 20, 100, point=(22, 60))
+    assert ":.1f} kPa" in fig.data[0].hovertemplate and ":.1f} °C" in fig.data[0].hovertemplate

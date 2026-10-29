@@ -101,8 +101,8 @@ Evidence categories are kept separate.
    calculations.
 4. **Interface and export tests** (`tests/test_app.py` with Streamlit AppTest; `tests/e2e/` with Playwright and
    Chromium; `tests/test_exports.py`): the rendered application shows the expected numbers, validation messages
-   appear, and downloaded PNG, CSV and R-script files exist and have valid content. The R script is executed with
-   `Rscript` (when available) and reproduces the app's values.
+   appear, and downloaded PNG, PDF, CSV and R-script files exist and have valid content. The R script is executed with
+   `Rscript` (when available): it reproduces the app's values and, with ggplot2, the heatmap PNG and PDF.
 
 Explicit numerical tolerances are defined at the top of `tests/test_science.py` and in `validation.py`.
 
@@ -111,6 +111,8 @@ Explicit numerical tolerances are defined at the top of `tests/test_science.py` 
 - Both equations are empirical fits; agreement between them says little about accuracy at extreme temperatures.
   Checks used 15–35 °C (FAO table) and 0–45 °C (properties).
 - The reference VPD values are rounded, so differences below about 5e-5 kPa cannot be resolved.
+- The interface shows values with one decimal place for readability; the validation tables and CSV exports keep full
+  precision, and all comparisons use unrounded values.
 - The app does not model atmospheric pressure, leaf boundary-layer effects, or sensor error.
 - Leaf VPD assumes saturated air inside the leaf at leaf temperature.
 - Target VPD ranges are user-defined; no species-specific optimum is claimed.
@@ -133,7 +135,7 @@ python -m pytest                            # everything
 
 Screenshots, downloaded files, the Streamlit server log and `console-errors.json` are written to
 `vpd_calculator/tests/artifacts/` (git-ignored; uploaded as the `test-artifacts` artifact in GitHub Actions).
-PNG export uses kaleido, which needs Chrome/Chromium; R-script reproduction needs `Rscript` and is skipped if absent.
+PNG/PDF export uses Matplotlib (no browser needed). R-script reproduction needs `Rscript` (and `ggplot2` for the heatmap) and is skipped if absent.
 
 ## Interpreting results
 
