@@ -1029,3 +1029,27 @@ def test_import_explanation_is_shown():
     at = new_app().run()
     text = " ".join(c.value for c in at.caption)
     assert "replaces the calculator, day/night and heatmap settings" in text
+
+
+# ---- heatmap leaf-temperature assumption caption -----------------------------------------------------
+def leaf_note(at):
+    return [c.value for c in at.tabs[2].caption if "constant leaf–air offset" in c.value]
+
+
+def test_heatmap_leaf_assumption_caption_for_leaf_colours_and_leaf_targets():
+    at = app_with_params({"hk": "leaf", "off": "-2"})                       # leaf heatmap, offset input
+    (note,) = leaf_note(at)
+    assert "-2.0 °C" in note and "30 °C air is 28 °C leaf" in note and "derived" not in note
+    at = app_with_params({"hk": "air", "ik": "leaf", "hg": "1", "off": "-2"})   # air heatmap, leaf target shown
+    assert len(leaf_note(at)) == 1
+    # measured leaf temperature: 22 degC air, 20 degC leaf -> -2 degC offset, explained
+    at = app_with_params({"hk": "air", "ik": "leaf", "t": "22", "lm": "20"})
+    (note,) = leaf_note(at)
+    assert "-2.0 °C" in note and "30 °C air is 28 °C leaf" in note
+    assert "measured leaf temperature (20.0 °C)" in note and "air temperature (22.0 °C)" in note
+
+
+def test_heatmap_leaf_assumption_caption_absent_without_leaf_use():
+    assert leaf_note(app_with_params({"hk": "air", "ik": "air", "off": "-2"})) == []      # air chart, air target
+    assert leaf_note(app_with_params({"hk": "air", "ik": "leaf", "hg": "0", "off": "-2"})) == []  # target hidden
+    assert leaf_note(app_with_params({"hk": "air", "ik": "leaf", "lo": "1.5", "hi": "0.5"})) == []  # invalid range

@@ -476,12 +476,15 @@ with tab_heat:
     if t_min >= t_max or rh_min >= rh_max:
         st.error("Minimum values must be smaller than maximum values.")
     else:
-        if hm_kind == vpd.LEAF:
-            st.caption(f"Leaf VPD uses a leaf offset of {offset:+.1f} °C from the Calculator tab"
-                       + (" (derived from the measured leaf temperature at the selected air temperature)."
-                          if measured is not None else "."))
         pt = (t_air, current_rh) if (show_point and current_rh is not None) else None
         tg = (lo, hi) if (show_target and interval_ok) else None
+        if hm_kind == vpd.LEAF or (tg is not None and ikind == vpd.LEAF):      # leaf VPD is used by the chart
+            note = (f"Leaf VPD here assumes one constant leaf–air offset of {offset:+.1f} °C at every air "
+                    f"temperature (for example, 30 °C air is {30 + offset:.0f} °C leaf).")
+            if measured is not None:
+                note += (f" The offset is derived from the measured leaf temperature ({measured:.1f} °C) and the "
+                         f"Calculator's air temperature ({t_air:.1f} °C).")
+            st.caption(note)
         fig = plots.heatmap_figure(t_min, t_max, rh_min, rh_max, hm_kind, offset, cscale, cstep,
                                    zmax_in or None, pt, tg, target_kind=ikind)
         st.plotly_chart(fig, width="stretch", config={"toImageButtonOptions": {"format": "png", "scale": 2}})
