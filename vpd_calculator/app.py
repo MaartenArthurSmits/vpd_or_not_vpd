@@ -518,17 +518,19 @@ with tab_heat:
                            help="Reproduces the calculation and this heatmap with ggplot2 (PNG and PDF export).")
 
         sig = (t_min, t_max, rh_min, rh_max, hm_kind, round(offset, 6), cscale, cstep, zmax_in, pt, tg, ikind)
-        if d2.button("Prepare publication-quality PNG", key="png_prepare"):
+        if d2.button("Prepare figure downloads", key="png_prepare"):
             export = mpl_export.heatmap_mpl(t_min, t_max, rh_min, rh_max, hm_kind, offset, cscale, cstep,
                                             zmax_in or None, pt, tg, target_kind=ikind)
             st.session_state["png"] = (sig, mpl_export.to_bytes(export, "png", 300),
-                                       mpl_export.to_bytes(export, "pdf"))
-        if "png" in st.session_state and st.session_state["png"][0] == sig:
-            d2.download_button("Download PNG", st.session_state["png"][1], "vpd_heatmap.png",
-                               "image/png", key="png_download")
-            d2.download_button("Download PDF", st.session_state["png"][2], "vpd_heatmap.pdf",
-                               "application/pdf", key="pdf_download")
-        st.caption("PNG (300 dpi) and PDF are rendered on the server with Matplotlib; no browser is needed.")
+                                       mpl_export.to_bytes(export, "pdf"), mpl_export.to_bytes(export, "svg"))
+        cached = st.session_state.get("png")
+        # Only a complete entry (PNG, PDF and SVG) for the current settings is offered; older entries are ignored.
+        if cached is not None and len(cached) == 4 and cached[0] == sig:
+            d2.download_button("Download PNG", cached[1], "vpd_heatmap.png", "image/png", key="png_download")
+            d2.download_button("Download PDF", cached[2], "vpd_heatmap.pdf", "application/pdf", key="pdf_download")
+            d2.download_button("Download SVG", cached[3], "vpd_heatmap.svg", "image/svg+xml", key="svg_download")
+        st.caption("PNG (300 dpi), PDF and SVG are rendered on the server with Matplotlib; no browser is needed. "
+                   "The heatmap colour layer is raster; contours, labels and annotations are vector.")
 
 # ==========================================================================
 # Methods & References

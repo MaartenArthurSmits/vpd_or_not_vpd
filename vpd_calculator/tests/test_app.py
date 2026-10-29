@@ -1065,3 +1065,52 @@ def test_heatmap_leaf_assumption_caption_absent_without_leaf_use():
     assert leaf_note(app_with_params({"hk": "air", "ik": "air", "off": "-2"})) == []      # air chart, air target
     assert leaf_note(app_with_params({"hk": "air", "ik": "leaf", "hg": "0", "off": "-2"})) == []  # target hidden
     assert leaf_note(app_with_params({"hk": "air", "ik": "leaf", "lo": "1.5", "hi": "0.5"})) == []  # invalid range
+
+
+# ---- heatmap figure downloads (PNG, PDF, SVG) and their cache -----------------------------------------
+def heatmap_downloads(at):
+    return {b.proto.label for b in at.get("download_button")} & {"Download PNG", "Download PDF", "Download SVG"}
+
+
+def capture_heatmap_downloads(monkeypatch):
+    from streamlit.delta_generator import DeltaGenerator
+    calls = {}
+    original = DeltaGenerator.download_button          # the heatmap buttons are created on a column
+
+    def spy(self, label, data, file_name=None, mime=None, *args, **kwargs):
+        if label in ("Download PNG", "Download PDF", "Download SVG"):
+            calls[label] = {"data": data, "file_name": file_name, "mime": mime}
+        return original(self, label, data, file_name, mime, *args, **kwargs)
+
+    monkeypatch.setattr(DeltaGenerator, "download_button", spy)
+    return calls
+
+
+def test_heatmap_svg_download_is_offered_with_png_and_pdf_and_follows_the_settings(monkeypatch):
+    calls = capture_heatmap_downloads(monkeypatch)
+    at = new_app().run()
+    assert heatmap_downloads(at) == set()                                   # nothing before preparing
+    at.button(key="png_prepare").click().run()
+    assert not at.exception and heatmap_downloads(at) == {"Download PNG", "Download PDF", "Download SVG"}
+    assert (calls["Download SVG"]["file_name"], calls["Download SVG"]["mime"]) == ("vpd_heatmap.svg", "image/svg+xml")
+    svg = calls["Download SVG"]["data"]
+    assert svg[:5] == b"<?xml" and b"<svg" in svg and b"<image" in svg      # raster colour layer
+    assert b"Air VPD" in svg and b"Leaf VPD" not in svg
+    assert calls["Download PNG"]["data"][:8] == b"\x89PNG\r\n\x1a\n" and calls["Download PDF"]["data"][:5] == b"%PDF-"
+    at.run()                                                                # unchanged settings keep the downloads
+    assert heatmap_downloads(at) == {"Download PNG", "Download PDF", "Download SVG"}
+    at.radio(key="hm_kind").set_value(share.LEAF_LABEL).run()               # changed settings hide the old ones
+    assert heatmap_downloads(at) == set()
+    at.button(key="png_prepare").click().run()
+    assert b"Leaf VPD" in calls["Download SVG"]["data"] and heatmap_downloads(at)
+
+
+def test_older_cached_heatmap_export_without_svg_is_ignored_without_error():
+    at = new_app().run()
+    at.button(key="png_prepare").click().run()
+    sig, png, pdf, _svg = at.session_state["png"]
+    at.session_state["png"] = (sig, png, pdf)                               # entry written by an older version
+    at.run()
+    assert not at.exception and heatmap_downloads(at) == set()
+    at.button(key="png_prepare").click().run()                              # preparing again refreshes it
+    assert len(at.session_state["png"]) == 4 and "Download SVG" in heatmap_downloads(at)

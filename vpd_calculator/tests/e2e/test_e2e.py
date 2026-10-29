@@ -154,15 +154,17 @@ def test_download_grid_csv(page, artifacts_dir):
 
 
 @pytest.mark.exports
-def test_download_heatmap_png_and_pdf_via_matplotlib(page, artifacts_dir):
+def test_download_heatmap_png_pdf_and_svg_via_matplotlib(page, artifacts_dir):
     open_tab(page, "VPD Heatmap")
-    page.get_by_role("button", name="Prepare publication-quality PNG").click()
+    page.get_by_role("button", name="Prepare figure downloads").click()
     page.get_by_role("button", name="Download PNG").wait_for(timeout=120_000)
     png = download(page, "Download PNG", artifacts_dir, "vpd_heatmap.png").read_bytes()
     assert png[:8] == b"\x89PNG\r\n\x1a\n" and len(png) > 10_000
     assert struct.unpack(">II", png[16:24]) == (3000, 1950)               # 300 dpi
     pdf = download(page, "Download PDF", artifacts_dir, "vpd_heatmap.pdf").read_bytes()
     assert pdf[:5] == b"%PDF-" and len(pdf) > 5_000
+    svg = download(page, "Download SVG", artifacts_dir, "vpd_heatmap.svg").read_bytes()
+    assert b"<svg" in svg[:600] and b"</svg>" in svg[-20:]
     assert page.get_by_text("Server-side PNG export is not available").count() == 0
 
 
