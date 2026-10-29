@@ -1035,7 +1035,7 @@ def test_import_explanation_is_shown():
 
 # ---- heatmap leaf-temperature assumption caption -----------------------------------------------------
 def leaf_note(at):
-    return [c.value for c in at.tabs[2].caption if "constant leaf–air offset" in c.value]
+    return [c.value for c in at.tabs[3].caption if "constant leaf–air offset" in c.value]
 
 
 def test_heatmap_leaf_assumption_caption_for_leaf_colours_and_leaf_targets():
@@ -1054,7 +1054,7 @@ def test_heatmap_leaf_assumption_caption_for_leaf_colours_and_leaf_targets():
 
 def test_heatmap_condensation_note_only_when_the_zero_line_is_drawn():
     def notes(params):
-        return [c.value for c in new_app_with(params).tabs[2].caption if "possible condensation" in c.value]
+        return [c.value for c in new_app_with(params).tabs[3].caption if "possible condensation" in c.value]
     new_app_with = app_with_params
     assert len(notes({"hk": "leaf", "off": "-2"})) == 1          # zero boundary crosses the chart
     assert notes({"hk": "leaf", "off": "0"}) == []               # VPD = 0 only at the 100 % RH edge
@@ -1114,3 +1114,78 @@ def test_older_cached_heatmap_export_without_svg_is_ignored_without_error():
     assert not at.exception and heatmap_downloads(at) == set()
     at.button(key="png_prepare").click().run()                              # preparing again refreshes it
     assert len(at.session_state["png"]) == 4 and "Download SVG" in heatmap_downloads(at)
+
+
+# ---- Compare treatments tab ------------------------------------------------------------------------------
+import treatments as treat  # noqa: E402
+
+
+def compare_csv_spy(monkeypatch):
+    import streamlit as st
+    calls = []
+    original = st.download_button
+
+    def spy(label, data, *args, **kwargs):
+        if label == "Download comparison (CSV)":
+            calls.append(data)
+        return original(label, data, *args, **kwargs)
+
+    monkeypatch.setattr(st, "download_button", spy)
+    return calls
+
+
+def compare_results(at):
+    (df,) = [d.value for d in at.tabs[2].dataframe if treat.STATUS in d.value.columns]   # not the editor
+    return df
+
+
+def test_compare_tab_starts_with_two_example_rows_and_matching_results(monkeypatch):
+    import io
+    calls = compare_csv_spy(monkeypatch)
+    at = new_app().run()
+    assert not at.exception
+    df = compare_results(at)
+    assert df[treat.NAME].tolist() == ["Example A (22 °C, 60 % RH)", "Example B (33 °C, 60 % RH)"]
+    assert df[treat.VPD_AIR].tolist() == [vpd.vpd_air(22, 60), vpd.vpd_air(33, 60)]
+    assert df[treat.VPD_LEAF].tolist() == [vpd.vpd_leaf(22, 60, 22), vpd.vpd_leaf(33, 60, 33)]
+    csv = io.StringIO(calls[-1].decode())
+    import pandas as pd
+    back = pd.read_csv(csv)
+    assert back[treat.VPD_AIR].tolist() == pytest.approx([vpd.vpd_air(22, 60), vpd.vpd_air(33, 60)], abs=1e-12)
+    assert back[treat.VPD_AIR].iloc[0] != round(back[treat.VPD_AIR].iloc[0], 1)       # full precision in the CSV
+    assert not at.error and not at.warning or all("treatment" not in w.value.lower() for w in at.error)
+
+
+def test_compare_table_edits_add_invalid_rows_and_stay_independent(monkeypatch):
+    calls = compare_csv_spy(monkeypatch)
+    at = new_app().run()
+    set_num(at, "t_air", 28.0)                                                    # other tabs' settings
+    at.session_state["cmp_editor"] = {
+        "edited_rows": {0: {treat.T_AIR: 30.0, treat.RH: 100.0, treat.OFFSET: -3.0}, 1: {treat.RH: 55.0}},
+        "added_rows": [{treat.NAME: "Cold", treat.T_AIR: 15.0, treat.RH: 50.0, treat.OFFSET: 0.0},
+                       {treat.NAME: "Broken", treat.T_AIR: 15.0}],
+        "deleted_rows": [],
+    }
+    at.run()
+    assert not at.exception
+    df = compare_results(at)
+    assert df[treat.NAME].tolist() == ["Example A (22 °C, 60 % RH)", "Example B (33 °C, 60 % RH)", "Cold", "Broken"]
+    assert df[treat.VPD_AIR].iloc[0] == vpd.vpd_air(30, 100) and df[treat.T_LEAF].iloc[0] == 27.0
+    assert df[treat.VPD_LEAF].iloc[0] < 0 and df[treat.VPD_AIR].iloc[1] == vpd.vpd_air(33, 55)
+    assert df[treat.VPD_AIR].iloc[2] == vpd.vpd_air(15, 50)
+    assert df[treat.STATUS].iloc[3].startswith("Row 4 not calculated") and pd_isna(df[treat.VPD_AIR].iloc[3])
+    errors = [e.value for e in at.error]
+    assert any("Broken" in e and "Relative humidity missing" in e for e in errors)
+    assert any("Example A" in w.value and "condensation" in w.value for w in at.warning)  # saturated air, leaf 3 degC cooler
+    # settings of the other tabs are untouched; rows survive a plain rerun
+    assert at.session_state["t_air"] == 28.0 and at.session_state["dn_t_day"] == 22.0 and at.session_state["hm_tmin"] == 10.0
+    at.run()
+    assert compare_results(at)[treat.NAME].tolist()[-2:] == ["Cold", "Broken"] and b"Cold" in calls[-1]
+    at.session_state["cmp_editor"] = {"edited_rows": {}, "added_rows": [], "deleted_rows": [0, 1]}
+    at.run()
+    assert not at.exception and compare_results(at).empty
+
+
+def pd_isna(x):
+    import math
+    return x is None or (isinstance(x, float) and math.isnan(x))

@@ -14,6 +14,7 @@ import plots
 import presets
 import rscript
 import share
+import treatments
 import validation
 import vpd
 
@@ -24,7 +25,7 @@ def _refresh_helper_modules():
     Streamlit Cloud re-runs app.py after a push but keeps already-imported helper modules in
     memory, which can leave a new app.py talking to an old module.
     """
-    for name in ("vpd", "share", "presets", "citation", "validation", "plots", "mpl_export", "rscript"):
+    for name in ("vpd", "share", "presets", "citation", "validation", "plots", "mpl_export", "rscript", "treatments"):
         mod = importlib.import_module(name)
         stamp = Path(mod.__file__).stat().st_mtime_ns
         if getattr(mod, "_loaded_stamp", None) != stamp:
@@ -175,8 +176,8 @@ def to_csv(df):
     return df.to_csv(index=False).encode("utf-8")
 
 
-tab_calc, tab_daynight, tab_heat, tab_methods = st.tabs(
-    ["Calculator", "Day & Night", "VPD Heatmap", "Methods & References"])
+tab_calc, tab_daynight, tab_compare, tab_heat, tab_methods = st.tabs(
+    ["Calculator", "Day & Night", "Compare treatments", "VPD Heatmap", "Methods & References"])
 
 # ==========================================================================
 # Calculator
@@ -449,6 +450,37 @@ with tab_daynight:
 
     period_section("Day")
     period_section("Night")
+
+# ==========================================================================
+# Compare treatments
+# ==========================================================================
+with tab_compare:
+    st.subheader("Compare treatments")
+    st.caption("Edit the table to compare conditions side by side: add rows at the bottom, delete rows with the "
+               "row selector. Leaf temperature = air temperature + offset. Rows with missing or out-of-range "
+               "values are flagged and not calculated. This table is independent of the other tabs.")
+    st.session_state.setdefault("cmp_base", treatments.EXAMPLES.copy())      # unchanged base; edits live in the widget
+    edited = st.data_editor(
+        st.session_state["cmp_base"], num_rows="dynamic", hide_index=True, key="cmp_editor", width="stretch",
+        column_config={
+            treatments.NAME: st.column_config.TextColumn(treatments.NAME, required=False),
+            treatments.T_AIR: st.column_config.NumberColumn(treatments.T_AIR, format="%.1f", step=0.1),
+            treatments.RH: st.column_config.NumberColumn(treatments.RH, format="%.1f", step=0.1),
+            treatments.OFFSET: st.column_config.NumberColumn(treatments.OFFSET, format="%.1f", step=0.1),
+        })
+    compared = treatments.evaluate(edited)
+    st.markdown("**Results**")
+    st.dataframe(compared, hide_index=True, width="stretch", key="cmp_results",
+                 column_config={c: st.column_config.NumberColumn(c, format="%.1f")
+                                for c in (treatments.T_AIR, treatments.RH, treatments.OFFSET, *treatments.RESULTS)})
+    flagged = compared[compared[treatments.STATUS] != treatments.OK]
+    for _, row in flagged.iterrows():
+        (st.warning if row[treatments.STATUS] == treatments.CONDENSATION else st.error)(
+            f"{row[treatments.NAME] or 'Unnamed row'}: {row[treatments.STATUS]}")
+    st.download_button("Download comparison (CSV)", treatments.to_csv(compared), "vpd_treatment_comparison.csv",
+                       "text/csv", key="dl_compare_csv")
+    st.caption("The table shows one decimal; the CSV keeps full calculation precision.")
+
 
 # ==========================================================================
 # Heatmap
