@@ -809,3 +809,59 @@ def test_partial_heatmap_link_does_not_error_and_keeps_other_defaults(partial):
     assert not at.exception
     assert at.number_input(key="hm_tmax").value == 40.0 and at.number_input(key="hm_rhmin").value == 10.0
     assert {k: qp(at, k) for k in partial} == {k: v for k, v in partial.items()}   # URL keeps the saved values
+
+
+# ---- setup (JSON) download ---------------------------------------------------------------------------
+def capture_setup_downloads(monkeypatch):
+    """Record the data/filename given to the 'Download setup (JSON)' button on every run."""
+    import streamlit as st
+    calls = []
+    original = st.download_button
+
+    def spy(label, data, file_name=None, *args, **kwargs):
+        if label == "Download setup (JSON)":
+            calls.append({"data": data, "file_name": file_name, "mime": args[0] if args else kwargs.get("mime")})
+        return original(label, data, file_name, *args, **kwargs)
+
+    monkeypatch.setattr(st, "download_button", spy)
+    return calls
+
+
+def test_setup_json_download_is_valid_and_has_format_and_schema(monkeypatch):
+    import json
+    calls = capture_setup_downloads(monkeypatch)
+    at = new_app().run()
+    assert not at.exception and calls
+    call = calls[-1]
+    assert call["file_name"] == "vpd-setup.json" and call["mime"] == "application/json"
+    doc = json.loads(call["data"].decode("utf-8"))
+    assert doc["format"] == "vpd-calculator-setup" and doc["schema_version"] == 1
+    assert doc["parameters"] == share.build_params(at.session_state)
+    assert any("records the calculation and heatmap settings" in c.value for c in at.caption)
+
+
+def test_setup_json_preserves_non_default_settings_from_all_sections(monkeypatch):
+    import json
+    calls = capture_setup_downloads(monkeypatch)
+    at = app_with_params(ACCEPTANCE | {"t": "25", "rh": "40", "lo": "0.9", "hi": "1.3"} | HEATMAP_LINK)
+    p = json.loads(calls[-1]["data"].decode("utf-8"))["parameters"]
+    assert (p["t"], p["rh"], p["lo"], p["hi"]) == ("25", "40", "0.9", "1.3")                    # calculator
+    assert (p["dt"], p["doff"], p["dk"], p["dp"], p["dlo"], p["dhi"]) == ("33", "-2", "leaf", "veg", "1", "1")
+    assert (p["nt"], p["noff"], p["nlo"], p["nhi"], p["nk"]) == ("17", "1", "0.6", "1", "air")  # night
+    assert (p["hk"], p["htmin"], p["htmax"], p["hrmin"], p["hrmax"], p["hz"], p["hcs"], p["hst"],
+            p["hg"], p["hp"]) == ("leaf", "12", "38", "25", "95", "3.5", "Viridis", "0.2", "0", "0")  # heatmap
+    assert not any("png" in k for k in p)
+
+
+def test_setup_json_reflects_edits_made_after_a_previous_run(monkeypatch):
+    import json
+    calls = capture_setup_downloads(monkeypatch)
+    at = new_app().run()
+    first = json.loads(calls[-1]["data"].decode("utf-8"))["parameters"]
+    set_num(at, "t_air", 29.0)                                           # calculator
+    set_num(at, "dn_t_night", 14.0)                                      # day/night
+    at.selectbox(key="hm_cs").set_value("Cividis").run()                 # heatmap
+    second = json.loads(calls[-1]["data"].decode("utf-8"))["parameters"]
+    assert (first["t"], first["nt"], first["hcs"]) == ("22", "17", "RdYlBu_r")
+    assert (second["t"], second["nt"], second["hcs"]) == ("29", "14", "Cividis")
+    assert second == share.build_params(at.session_state)

@@ -172,3 +172,20 @@ def test_invalid_heatmap_parameters_are_ignored(bad):
 def test_heatmap_bounds_are_inclusive_and_not_clamped():
     ok = share.parse_params({"htmin": "-10", "htmax": "60", "hrmin": "0", "hrmax": "100", "hz": "0"})
     assert ok == {"hm_tmin": -10.0, "hm_tmax": 60.0, "hm_rhmin": 0.0, "hm_rhmax": 100.0, "hm_zmax": 0.0}
+
+
+# ---- setup (JSON) document ---------------------------------------------------------------------
+def test_setup_document_structure_and_parameters_are_the_share_serialization():
+    import json
+    doc = json.loads(share.setup_json(HM_STATE))
+    assert doc["format"] == "vpd-calculator-setup" and doc["schema_version"] == 1
+    assert set(doc) == {"format", "schema_version", "parameters"}
+    assert doc["parameters"] == share.build_params(HM_STATE)             # one canonical list of settings
+    assert share.SETUP_FILENAME == "vpd-setup.json"
+    assert {"t", "dt", "nt", "htmin", "hk"} <= set(doc["parameters"])
+
+
+def test_setup_document_contains_no_session_internals():
+    state = HM_STATE | {"png": ("sig", b"\x89PNG"), "val_png": ("sig", b"x"), "_share_loaded": True}
+    text = share.setup_json(state)
+    assert "png" not in text.lower() and "_share_loaded" not in text and "sig" not in text

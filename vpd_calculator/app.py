@@ -389,6 +389,10 @@ Methods & References for sources and limitations.
                    "It also restores the heatmap settings: VPD type, temperature and RH limits, colour "
                    "scale and maximum, contour spacing, and the target and selected-point toggles.")
         st.code(share.share_url(st.session_state), language=None)
+        st.download_button("Download setup (JSON)", share.setup_json(st.session_state).encode("utf-8"),
+                           share.SETUP_FILENAME, "application/json", key="dl_setup_json")
+        st.caption("The JSON file records the calculation and heatmap settings (the same settings as the link), "
+                   "not results, images or other session data.")
 
 # ==========================================================================
 # Heatmap

@@ -6,6 +6,7 @@ out-of-range values in a link are ignored rather than clamped.
 
 from __future__ import annotations
 
+import json
 import math
 from typing import Mapping
 from urllib.parse import urlencode
@@ -156,6 +157,20 @@ def build_params(state: Mapping) -> dict:
     for q, key in _BOOL_KEYS.items():
         p[q] = "1" if state.get(key, HEATMAP_DEFAULTS[key]) else "0"
     return p
+
+
+SETUP_FORMAT = "vpd-calculator-setup"
+SETUP_SCHEMA_VERSION = 1
+SETUP_FILENAME = "vpd-setup.json"
+
+
+def setup_document(state: Mapping) -> dict:
+    """Downloadable setup document. `parameters` is exactly the shared-link serialization (build_params)."""
+    return {"format": SETUP_FORMAT, "schema_version": SETUP_SCHEMA_VERSION, "parameters": build_params(state)}
+
+
+def setup_json(state: Mapping) -> str:
+    return json.dumps(setup_document(state), indent=2) + "\n"
 
 
 def share_url(state: Mapping, base: str = APP_URL) -> str:
