@@ -166,9 +166,9 @@ def test_leaf_temperature_guidance_replaces_scenario_text():
     text = " ".join(m.value for m in expander.markdown) + " ".join(c.value for c in expander.caption)
     text = " ".join(text.split())
     for needle in ("1–3 °C below air", "10–15 °C warmer in direct sun", "Figure 4](https://doi.org/10.1371/journal.pone.0138930.g004)",
-                   "| 0* | Night | −3 | −3 |", "| 250 | Overcast / shaded | −3 | −2 |", "| 500 | Cloudy | −2 | −1 |",
-                   "| 750 | Partly cloudy | −1 | 0 |", "| 1,000 | Strong direct sunlight | +0 | +1 |",
-                   "Artificial lighting combines LED and HPS"):
+                   "| 0 | Night | −3 | −3 |", "| 250 | Overcast / shaded | −3 | −2 |", "| 500 | Cloudy | −2 | −1 |",
+                   "| 750 | Partly cloudy | −1 | 0 |", "| 1,000 | Direct sunlight | +0 | +1 |",
+                   "**measure representative leaves with an infrared thermometer**"):
         assert needle in text, needle
     everything = " ".join(m.value for m in at.tabs[0].markdown) + " ".join(c.value for c in at.tabs[0].caption)
     assert "illustrative scenarios, not universal correction factors" not in everything
@@ -180,9 +180,37 @@ def test_leaf_temperature_guidance_replaces_scenario_text():
 def test_target_leaf_vpd_with_offset():
     at = new_app().run()
     at.radio(key="mode").set_value(share.MODE_B).run()
-    at.radio(key="target_kind").set_value(share.LEAF_LABEL).run()
+    at.radio(key="target_kind__w").set_value(share.LEAF_LABEL).run()
     set_num(at, "calc_offset", -2.0)
     assert live(at)["targetKind"] == "leaf" and live_values(at)["calc_offset"] == -2.0
+
+
+def test_reverse_target_defaults_to_leaf_and_modes_preserve_inputs():
+    at = new_app().run()
+    at.radio(key="mode").set_value(share.MODE_B).run()
+    assert at.radio(key="target_kind__w").value == share.LEAF_LABEL
+    assert at.radio(key="target_kind__w").options == [share.LEAF_LABEL, share.AIR_LABEL]
+    set_num(at, "t_air", 27.5)
+    set_num(at, "rh", 45.0)
+    set_num(at, "calc_offset", -1.5)
+    set_num(at, "calc_leaf_meas", 25.0)
+    set_num(at, "target_vpd", 1.3)
+    at.radio(key="target_kind__w").set_value(share.AIR_LABEL).run()
+    at.radio(key="calc_leaf_method").set_value(share.MEASURED_METHOD).run()
+    at.radio(key="calc_period").set_value("Night").run()
+    at.radio(key="mode").set_value(share.MODE_A).run()                           # target radio is not rendered here
+    assert live_values(at) == {"t_air": 27.5, "rh": 45.0, "calc_leaf_meas": 25.0}
+    at.radio(key="mode").set_value(share.MODE_B).run()
+    assert at.radio(key="target_kind__w").value == share.AIR_LABEL               # explicit choice survives
+    assert live_values(at) == {"t_air": 27.5, "target_vpd": 1.3, "calc_leaf_meas": 25.0}
+    assert at.radio(key="calc_period").value == "Night"
+    at.radio(key="calc_leaf_method").set_value(share.OFFSET_METHOD).run()
+    assert live_values(at)["calc_offset"] == -1.5 and at.session_state["rh"] == 45.0
+
+
+def test_restored_air_target_choice_is_respected():
+    at = app_with_params({"m": "b", "k": "air"})
+    assert at.radio(key="target_kind__w").value == share.AIR_LABEL
 
 
 # ---- acceptable range replaces the Calculator's own target range -----------------------------------

@@ -167,12 +167,6 @@ export function resultsHtml(d, v) {
   }
   h += `<div class="second" data-testid="secondary">Air VPD: <b>${k2(r.air)}</b></div>`;
   h += `<div class="cap">Leaf temperature used: ${f1(r.tLeaf)} \u00b0C (offset ${signed1(r.offset)} \u00b0C)</div>`;
-  if (d.mode === 'a') {
-    h += `<details><summary>Calculation details</summary><div class="det">
-      <div>Saturation vapour pressure (air)<b>${k2(r.esA)}</b></div>
-      <div>Actual vapour pressure<b>${k2(r.ea)}</b></div>
-      <div>Saturation vapour pressure (leaf)<b>${k2(r.esL)}</b></div></div></details>`;
-  }
   for (const w of r.warnings) h += `<div class="warn">${w}</div>`;
   return h;
 }

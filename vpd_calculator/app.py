@@ -80,6 +80,7 @@ if "_share_loaded" not in st.session_state:
     st.session_state.update(share.parse_params(st.query_params.to_dict()))
     derive_preset_state()
     st.session_state["_share_loaded"] = True
+st.session_state.setdefault("target_kind", share.LEAF_LABEL)      # default only when no (restored) choice exists
 
 
 def linked(label, key, lo, hi, step, fmt="%.1f", num_min=None, num_max=None, help=None, after=None):
@@ -127,32 +128,35 @@ def offset_widget(label, key, preset_key):
 FIG4_PATH = Path(__file__).parent / "assets" / "nelson_bugbee_2015_fig4.png"
 FIG4_URL = "https://doi.org/10.1371/journal.pone.0138930.g004"
 LEAF_GUIDANCE = f"""
-Some grow-equipment suppliers suggest leaf temperatures 1–3 °C below air ([Pulse](https://pulsegrow.com/blogs/learn/vpd)),
-but actual differences vary considerably: coffee leaves were measured 1–3 °C cooler in shade and 10–15 °C warmer in
-direct sun ([Butler, 1977](https://natuurtijdschriften.nl/pub/540166)). Nelson and Bugbee’s (2015)
-[Figure 4]({FIG4_URL}) illustrates how light intensity, airflow, humidity, leaf size and stomatal conductance affect
-this difference.
+Most grow-equipment suppliers suggest using leaf temperatures 1–3 °C below air temperature, but actual differences
+vary considerably: leaves have been measured 1–3 °C cooler in shade and 10–15 °C warmer in direct sun
+([Butler, 1977](https://natuurtijdschriften.nl/pub/540166)).
+[Nelson and Bugbee’s (2015)](https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0138930) illustrates
+how light intensity, airflow, humidity, leaf size, and stomatal conductance affect this difference.
 
-Measure representative leaves with an infrared thermometer whenever possible; otherwise, treat the following values
-as estimates.
+It is recommended to **measure representative leaves with an infrared thermometer** whenever possible; otherwise,
+use the following estimates.
 """
 LEAF_TABLE = """
-**Illustrative leaf-temperature offsets** (°C; leaf minus air):
+**Estimated leaf-temperature offsets** (°C; leaf minus air):
 
-| PPFD (µmol m⁻² s⁻¹) | Rough natural-light indicator | Sunlight | Artificial lighting |
+| PPFD (µmol m⁻² s⁻¹) | Natural-light indicator | Sunlight | Artificial lighting |
 | ---: | --- | ---: | ---: |
-| 0* | Night | −3 | −3 |
+| 0 | Night | −3 | −3 |
 | 250 | Overcast / shaded | −3 | −2 |
 | 500 | Cloudy | −2 | −1 |
 | 750 | Partly cloudy | −1 | 0 |
-| 1,000 | Strong direct sunlight | +0 | +1 |
+| 1,000 | Direct sunlight | +0 | +1 |
 """
 LEAF_TABLE_CAPTION = (
-    f"Simplified illustrative estimates informed by [Nelson and Bugbee (2015), Figure 4]({FIG4_URL}). The reference "
-    "figure assumes 25 °C air, 50% RH, 1 m/s airflow, 5 cm leaf width and stomatal conductance of "
-    "0.4 mol m⁻² s⁻¹. Artificial lighting combines LED and HPS into one illustrative category.\n\n"
-    "*The zero-light row is illustrative; actual night-time offsets depend on conditions. Natural-light "
-    "descriptions are rough indicators.")
+    f"Estimates informed by [Nelson and Bugbee (2015), Figure 4]({FIG4_URL}). The reference figure assumes 25 °C air, "
+    "50% RH, 1 m/s airflow, 5 cm leaf width, and stomatal conductance of 0.4 mol m⁻² s⁻¹.")
+EQ_SATURATION = r"e_s(T)=0.6108\exp\left(\frac{17.27T}{T+237.3}\right)"
+EQ_FORWARD = r"VPD_{\mathrm{leaf}}=e_s(T_{\mathrm{leaf}})-e_s(T_{\mathrm{air}})\frac{RH}{100}"
+EQ_REVERSE_LEAF = r"RH=100\frac{e_s(T_{\mathrm{leaf}})-VPD_{\mathrm{target}}}{e_s(T_{\mathrm{air}})}"
+EQ_REVERSE_AIR = r"RH=100\left(1-\frac{VPD_{\mathrm{target}}}{e_s(T_{\mathrm{air}})}\right)"
+EQ_CAPTION = ("Temperature in °C; vapour pressure and VPD in kPa; RH in %. Saturation pressure: "
+              "[FAO-56, Eq. 11](https://www.fao.org/4/x0490e/x0490e07.htm).")
 FIG4_CREDIT = (f"Figure: Nelson & Bugbee (2015), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), "
                f"original at {FIG4_URL}. Shown unmodified.")
 
@@ -213,7 +217,12 @@ with tab_calc:
                                key="calc_leaf_method", horizontal=True)
     with o2:
         if not mode_a:
-            kind_label = st.radio("Target VPD refers to", ["Air VPD", "Leaf VPD"], key="target_kind", horizontal=True)
+            def set_target_kind():
+                st.session_state["target_kind"] = st.session_state["target_kind__w"]
+            st.session_state["target_kind__w"] = st.session_state["target_kind"]   # widget key is dropped while hidden
+            st.radio("Target VPD refers to", [share.LEAF_LABEL, share.AIR_LABEL], key="target_kind__w",
+                     on_change=set_target_kind, horizontal=True)
+    kind_label = st.session_state["target_kind"]
     with o3:
         period = st.radio("Compare with Acceptable range", ["Day", "Night"], key="calc_period", horizontal=True)
 
@@ -263,6 +272,18 @@ with tab_calc:
         res = vpd.calculate_required_rh(t_air, st.session_state["target_vpd"], kind_from_label(kind_label),
                                         offset, measured)
         current_rh = min(max(res.rh, 0.0), 100.0) if res.attainable else None   # only tiny float-tolerance clipping
+
+    es_air, es_leaf = (float(vpd.saturation_vapour_pressure(x)) for x in (t_air, offset + t_air))
+    with st.expander("Calculation details"):
+        d1, d2, d3 = st.columns(3)
+        d1.markdown(f"Saturation vapour pressure (air)  \n**{es_air:.2f} kPa**")
+        d3.markdown(f"Saturation vapour pressure (leaf)  \n**{es_leaf:.2f} kPa**")
+        if mode_a or res.attainable:
+            rh_used = st.session_state["rh"] if mode_a else res.rh
+            d2.markdown(f"Actual vapour pressure  \n**{es_air * rh_used / 100:.2f} kPa**")
+        st.latex(EQ_SATURATION)
+        st.latex(EQ_FORWARD if mode_a else EQ_REVERSE_AIR if kind_label == share.AIR_LABEL else EQ_REVERSE_LEAF)
+        st.caption(EQ_CAPTION)
 
     with st.expander("Leaf-temperature guidance"):
         st.markdown(LEAF_GUIDANCE)
