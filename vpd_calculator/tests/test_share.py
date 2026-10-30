@@ -178,8 +178,8 @@ def test_heatmap_bounds_are_inclusive_and_not_clamped():
 def test_setup_document_structure_and_parameters_are_the_share_serialization():
     import json
     doc = json.loads(share.setup_json(HM_STATE))
-    assert doc["format"] == "vpd-calculator-setup" and doc["schema_version"] == 1
-    assert set(doc) == {"format", "schema_version", "parameters"}
+    assert doc["format"] == "vpd-calculator-setup" and doc["schema_version"] == 2
+    assert set(doc) == {"format", "schema_version", "parameters", "comparison"}
     assert doc["parameters"] == share.build_params(HM_STATE)             # one canonical list of settings
     assert share.SETUP_FILENAME == "vpd-setup.json"
     assert {"t", "dt", "nt", "htmin", "hk"} <= set(doc["parameters"])
@@ -222,7 +222,8 @@ def test_validate_setup_ignores_unknown_keys_and_accepts_json_numbers():
     (b"\"text\"", "top level"),
     (setup_bytes({}, format="something-else"), "format"),
     (b'{"schema_version": 1, "parameters": {}}', "format"),
-    (setup_bytes({}, schema_version=2), "schema_version"),
+    (setup_bytes({}, schema_version=3), "schema_version"),
+    (setup_bytes({}, schema_version=0), "schema_version"),
     (setup_bytes({}, schema_version="1"), "schema_version"),
     (setup_bytes({}, schema_version=True), "schema_version"),
     (b'{"format": "vpd-calculator-setup", "schema_version": 1}', "parameters"),
@@ -239,3 +240,38 @@ def test_validate_setup_ignores_unknown_keys_and_accepts_json_numbers():
 def test_validate_setup_rejects_bad_files_with_a_clear_message(raw, fragment):
     params, error = share.validate_setup(raw)
     assert params is None and error and fragment in error
+
+
+# ---- schema version 2: comparison section ------------------------------------------------------------
+def setup_v2(comparison, params=None):
+    import json
+    return json.dumps({"format": "vpd-calculator-setup", "schema_version": 2, "parameters": params or {},
+                       "comparison": comparison}).encode()
+
+
+def test_parse_setup_reads_version_1_without_a_comparison_section():
+    params, comparison, error = share.parse_setup(setup_bytes({"t": "25"}))
+    assert (params, comparison, error) == ({"t": "25"}, None, None)
+    assert share.parse_setup(setup_v2({"rows": []}, {"t": "25"})) == ({"t": "25"}, {"rows": [], "show_markers": False}, None)
+    assert share.parse_setup(b'{"format": "vpd-calculator-setup", "schema_version": 2, "parameters": {}}')[1] is None
+
+
+def test_parse_setup_keeps_rows_in_order_with_null_cells_and_converts_numbers():
+    rows = [{"name": "A", "t_air": 22, "rh": 60.5, "offset": 0}, {"name": None, "t_air": None, "rh": 40, "offset": None},
+            {"name": "", "t_air": 99, "rh": None, "offset": -3}]          # draft and out-of-range rows are structurally fine
+    _, comparison, error = share.parse_setup(setup_v2({"rows": rows, "show_markers": True}))
+    assert error is None and comparison["show_markers"] is True
+    assert comparison["rows"] == [{"name": "A", "t_air": 22.0, "rh": 60.5, "offset": 0.0},
+                                  {"name": None, "t_air": None, "rh": 40.0, "offset": None},
+                                  {"name": "", "t_air": 99.0, "rh": None, "offset": -3.0}]
+
+
+@pytest.mark.parametrize("section", [
+    "rows", [], {"rows": "x"}, {"rows": {"a": 1}}, {"rows": [1]}, {"rows": [[1, 2]]},
+    {"rows": [{"name": 5}]}, {"rows": [{"name": ["A"]}]}, {"rows": [{"t_air": "22"}]}, {"rows": [{"rh": True}]},
+    {"rows": [{"offset": [0]}]}, {"rows": [{"t_air": float("nan")}]}, {"rows": [{"rh": float("inf")}]},
+    {"rows": [{}] * 501}, {"rows": [], "show_markers": "yes"}, {"rows": [], "show_markers": 1}, None,
+])
+def test_malformed_comparison_sections_are_rejected_as_a_whole(section):
+    params, comparison, error = share.parse_setup(setup_v2(section, {"t": "25"}))
+    assert (params, comparison) == (None, None) and error and "Nothing was changed" in error

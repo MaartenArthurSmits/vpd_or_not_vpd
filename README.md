@@ -24,8 +24,8 @@ Five tabs: **Calculator**, **Day & Night**, **Compare treatments**, **VPD Heatma
 - **Heatmap:** interactive temperature x RH plot (air or leaf VPD) with contours, target range and selected point.
 - **Exports:** grid CSV, settings CSV, publication-quality heatmap PNG (300 dpi) and PDF rendered with Matplotlib
   (no browser needed), and a reproducible R script that recreates the calculation and the heatmap with ggplot2.
-- **Shareable links and setup file:** a link restores calculator, day/night and heatmap settings; the same settings can be
-  downloaded as `vpd-setup.json`.
+- **Shareable links and setup file:** a link restores calculator, day/night and heatmap settings; the same settings, plus the Compare
+  treatments table, can be saved as `vpd-setup.json` and loaded again.
 - **Scientific validation** against FAO-56 tables and an alternative published equation (Methods & References).
 
 Values are displayed with one decimal place; calculations, validation tables and CSV exports keep full precision.

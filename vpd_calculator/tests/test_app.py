@@ -865,7 +865,7 @@ def test_setup_json_download_is_valid_and_has_format_and_schema(monkeypatch):
     call = calls[-1]
     assert call["file_name"] == "vpd-setup.json" and call["mime"] == "application/json"
     doc = json.loads(call["data"].decode("utf-8"))
-    assert doc["format"] == "vpd-calculator-setup" and doc["schema_version"] == 1
+    assert doc["format"] == "vpd-calculator-setup" and doc["schema_version"] == 2
     assert doc["parameters"] == share.build_params(at.session_state)
     assert any("records the calculation and heatmap settings" in c.value for c in at.caption)
 
@@ -962,7 +962,7 @@ def test_export_change_import_restores_the_saved_setup(monkeypatch):
     "{not json",
     b"\xff\xfe",
     '{"format": "other", "schema_version": 1, "parameters": {}}',
-    '{"format": "vpd-calculator-setup", "schema_version": 2, "parameters": {}}',
+    '{"format": "vpd-calculator-setup", "schema_version": 3, "parameters": {}}',
     '{"format": "vpd-calculator-setup", "schema_version": 1, "parameters": {"t": "999"}}',
     '{"format": "vpd-calculator-setup", "schema_version": 1, "parameters": {"t": "30", "hk": "water"}}',
     '{"format": "vpd-calculator-setup", "schema_version": 1, "parameters": {"dt": "30", "hz": "1e999"}}',
@@ -1243,3 +1243,92 @@ def test_treatment_markers_without_leaf_vpd_in_the_chart_need_no_offset_explanat
     at.run()
     at.checkbox(key="hm_treatments").set_value(True).run()                              # air heatmap, air target
     assert len(treatment_trace(at)) == 1 and "Marker values use" not in heatmap_captions(at)
+
+
+# ---- setup file (schema version 2): comparison treatments and marker toggle ------------------------------
+V2_ROWS = {
+    "edited_rows": {0: {treat.OFFSET: -2.0}, 1: {treat.NAME: "Warm", treat.OFFSET: 1.0}},
+    "added_rows": [{treat.NAME: "Draft", treat.T_AIR: 30.0}, {treat.T_AIR: 25.0, treat.RH: 40.0}],
+    "deleted_rows": [],
+}
+
+
+def results_status(at):
+    return compare_results(at)[treat.STATUS].tolist()
+
+
+def test_setup_v2_round_trip_with_treatments_incomplete_rows_and_markers(monkeypatch):
+    import json
+    calls = capture_setup_downloads(monkeypatch)
+    at = new_app()
+    at.session_state["cmp_editor"] = V2_ROWS
+    at.run()
+    at.checkbox(key="hm_treatments").set_value(True).run()
+    saved_names, saved_status = compare_results(at)[treat.NAME].tolist(), results_status(at)
+    saved_markers = treatment_trace(at)[0]["hovertext"]
+    text = calls[-1]["data"].decode("utf-8")
+    doc = json.loads(text)
+    assert doc["schema_version"] == 2 and doc["comparison"]["show_markers"] is True and "NaN" not in text
+    rows = doc["comparison"]["rows"]
+    assert [r["name"] for r in rows] == ["Example A (22 °C, 60 % RH)", "Warm", "Draft", None]
+    assert rows[2] == {"name": "Draft", "t_air": 30.0, "rh": None, "offset": None}
+    assert saved_status[2].startswith("Row 3 not calculated") and saved_status[3].startswith("Row 4 not calculated")
+    # a fresh session with other settings: loading the file restores everything together
+    other = new_app().run()
+    set_num(other, "t_air", 31.0)
+    other.session_state["cmp_editor"] = {"edited_rows": {}, "added_rows": [], "deleted_rows": [0, 1]}
+    other.run()
+    assert compare_results(other).empty and not other.checkbox(key="hm_treatments").value
+    upload_setup(other, text)
+    apply_setup_click(other)
+    assert not other.error or all("Setup not applied" not in e.value for e in other.error)
+    assert other.session_state["t_air"] == 22.0                                        # parameters restored too
+    assert compare_results(other)[treat.NAME].tolist() == saved_names
+    assert results_status(other) == saved_status                                        # drafts keep their messages
+    assert other.checkbox(key="hm_treatments").value is True
+    assert treatment_trace(other)[0]["hovertext"] == saved_markers                      # markers recalculated
+    # subsequent edits work normally and are not overwritten by the file
+    other.session_state["cmp_editor"] = {"edited_rows": {2: {treat.RH: 50.0, treat.OFFSET: 0.0}}, "added_rows": [],
+                                         "deleted_rows": []}
+    other.run()
+    assert results_status(other)[2] == "OK" and compare_results(other)[treat.NAME].tolist() == saved_names
+    other.run()
+    assert results_status(other)[2] == "OK" and len(treatment_trace(other)[0]["x"]) == 3
+
+
+def test_malformed_comparison_section_leaves_the_whole_setup_unchanged():
+    at = new_app()
+    at.session_state["cmp_editor"] = V2_ROWS
+    at.run()
+    at.checkbox(key="hm_treatments").set_value(True).run()
+    before = (widget_snapshot(at), compare_results(at)[treat.NAME].tolist(), results_status(at),
+              at.checkbox(key="hm_treatments").value, dict(at.query_params))
+    bad = ('{"format": "vpd-calculator-setup", "schema_version": 2, "parameters": {"t": "30", "dk": "leaf"}, '
+           '"comparison": {"rows": [{"name": "Oops", "t_air": "hot", "rh": 50, "offset": 0}], "show_markers": false}}')
+    upload_setup(at, bad)
+    apply_setup_click(at)
+    after = (widget_snapshot(at), compare_results(at)[treat.NAME].tolist(), results_status(at),
+             at.checkbox(key="hm_treatments").value, dict(at.query_params))
+    assert after == before
+    assert any("Setup not applied" in e.value and "Comparison row 1" in e.value for e in at.error)
+
+
+def test_version_1_setup_still_loads_and_leaves_the_comparison_unchanged():
+    at = new_app()
+    at.session_state["cmp_editor"] = V2_ROWS
+    at.run()
+    at.checkbox(key="hm_treatments").set_value(True).run()
+    names, status = compare_results(at)[treat.NAME].tolist(), results_status(at)
+    upload_setup(at, '{"format": "vpd-calculator-setup", "schema_version": 1, '
+                     '"parameters": {"t": "30", "dk": "leaf", "dlo": "1", "dhi": "1"}}')
+    apply_setup_click(at)
+    assert not any("Setup not applied" in e.value for e in at.error)
+    assert at.session_state["t_air"] == 30.0 and at.session_state["dn_kind_day"] == share.LEAF_LABEL
+    assert compare_results(at)[treat.NAME].tolist() == names and results_status(at) == status
+    assert at.checkbox(key="hm_treatments").value is True and len(treatment_trace(at)) == 1
+
+
+def test_sharing_explanation_separates_json_coverage_from_links():
+    at = new_app().run()
+    text = " ".join(c.value for c in at.caption)
+    assert "not in links" in text and "Compare treatments input rows" in text and "version-2" in text

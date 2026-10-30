@@ -81,6 +81,27 @@ def markers_in_view(results: pd.DataFrame, t_min, t_max, rh_min, rh_max) -> tupl
     return inside, outside
 
 
+def rows_to_records(rows: pd.DataFrame) -> list:
+    """Input cells of the table as JSON-ready records (empty or non-finite cells become None, not NaN)."""
+    records = []
+    for _, row in rows.iterrows():
+        name = row.get(NAME)
+        name = None if name is None or (isinstance(name, float) and math.isnan(name)) else str(name)
+        records.append({"name": name, "t_air": _number(row.get(T_AIR)), "rh": _number(row.get(RH)),
+                        "offset": _number(row.get(OFFSET))})
+    return records
+
+
+def records_to_frame(records: list) -> pd.DataFrame:
+    """Inverse of rows_to_records: the editable table (empty cells as missing values), same row order."""
+    return pd.DataFrame({
+        NAME: pd.Series([r["name"] for r in records], dtype="object"),
+        T_AIR: pd.Series([r["t_air"] for r in records], dtype="float64"),
+        RH: pd.Series([r["rh"] for r in records], dtype="float64"),
+        OFFSET: pd.Series([r["offset"] for r in records], dtype="float64"),
+    })
+
+
 def to_csv(results: pd.DataFrame) -> bytes:
     """Inputs and results at full precision (blank where a row was not calculated)."""
     return results.to_csv(index=False).encode("utf-8")

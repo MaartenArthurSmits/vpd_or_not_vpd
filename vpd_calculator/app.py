@@ -99,7 +99,7 @@ def apply_setup():
     if upload is None:
         st.session_state["_setup_status"] = ("error", "Choose a setup file first. Nothing was changed.")
         return
-    params, error = share.validate_setup(upload.getvalue())
+    params, comparison, error = share.parse_setup(upload.getvalue())
     if error:
         st.session_state["_setup_status"] = ("error", f"Setup not applied: {error}")
         return
@@ -108,6 +108,10 @@ def apply_setup():
     st.session_state.update(SETTING_DEFAULTS)                 # settings missing from the file use the defaults
     st.session_state.update(share.parse_params(params))
     derive_preset_state()
+    if comparison is not None:                                 # version-2 file: comparison table and marker toggle
+        st.session_state["cmp_base"] = treatments.records_to_frame(comparison["rows"])
+        st.session_state.pop("cmp_editor", None)               # edits belong to the previous table
+        st.session_state["hm_treatments"] = comparison["show_markers"]
     st.session_state["_setup_status"] = ("ok", f"Setup \"{upload.name}\" applied.")
 
 
@@ -178,6 +182,37 @@ def to_csv(df):
 
 tab_calc, tab_daynight, tab_compare, tab_heat, tab_methods = st.tabs(
     ["Calculator", "Day & Night", "Compare treatments", "VPD Heatmap", "Methods & References"])
+
+# ==========================================================================
+# Compare treatments (rendered before the Calculator tab so the setup download can read the current rows)
+# ==========================================================================
+with tab_compare:
+    st.subheader("Compare treatments")
+    st.caption("Edit the table to compare conditions side by side: add rows at the bottom, delete rows with the "
+               "row selector. Leaf temperature = air temperature + offset. Rows with missing or out-of-range "
+               "values are flagged and not calculated. This table is independent of the other tabs.")
+    st.session_state.setdefault("cmp_base", treatments.EXAMPLES.copy())      # unchanged base; edits live in the widget
+    edited = st.data_editor(
+        st.session_state["cmp_base"], num_rows="dynamic", hide_index=True, key="cmp_editor", width="stretch",
+        column_config={
+            treatments.NAME: st.column_config.TextColumn(treatments.NAME, required=False),
+            treatments.T_AIR: st.column_config.NumberColumn(treatments.T_AIR, format="%.1f", step=0.1),
+            treatments.RH: st.column_config.NumberColumn(treatments.RH, format="%.1f", step=0.1),
+            treatments.OFFSET: st.column_config.NumberColumn(treatments.OFFSET, format="%.1f", step=0.1),
+        })
+    compared = treatments.evaluate(edited)
+    st.markdown("**Results**")
+    st.dataframe(compared, hide_index=True, width="stretch", key="cmp_results",
+                 column_config={c: st.column_config.NumberColumn(c, format="%.1f")
+                                for c in (treatments.T_AIR, treatments.RH, treatments.OFFSET, *treatments.RESULTS)})
+    flagged = compared[compared[treatments.STATUS] != treatments.OK]
+    for _, row in flagged.iterrows():
+        (st.warning if row[treatments.STATUS] == treatments.CONDENSATION else st.error)(
+            f"{row[treatments.NAME] or 'Unnamed row'}: {row[treatments.STATUS]}")
+    st.download_button("Download comparison (CSV)", treatments.to_csv(compared), "vpd_treatment_comparison.csv",
+                       "text/csv", key="dl_compare_csv")
+    st.caption("The table shows one decimal; the CSV keeps full calculation precision.")
+
 
 # ==========================================================================
 # Calculator
@@ -356,18 +391,25 @@ Methods & References for sources and limitations.
                    "temperature, leaf-temperature offset, lower and upper VPD limits, whether the range "
                    "applies to air or leaf VPD, and the selected growth-stage preset (or Custom). "
                    "It also restores the heatmap settings: VPD type, temperature and RH limits, colour "
-                   "scale and maximum, contour spacing, and the target and selected-point toggles.")
+                   "scale and maximum, contour spacing, and the target and selected-point toggles. Comparison "
+                   "treatments are saved in the JSON setup file below, not in links.")
         st.code(share.share_url(st.session_state), language=None)
-        st.download_button("Download setup (JSON)", share.setup_json(st.session_state).encode("utf-8"),
+        comparison_setup = {"rows": treatments.rows_to_records(edited),
+                            "show_markers": bool(st.session_state.get("hm_treatments", False))}
+        st.download_button("Download setup (JSON)",
+                           share.setup_json(st.session_state, comparison_setup).encode("utf-8"),
                            share.SETUP_FILENAME, "application/json", key="dl_setup_json")
-        st.caption("The JSON file records the calculation and heatmap settings (the same settings as the link), "
-                   "not results, images or other session data.")
+        st.caption("The JSON file records the calculation and heatmap settings (the same settings as the link) and, "
+                   "in addition, the Compare treatments input rows and the 'Show comparison treatments' toggle. "
+                   "Results are recalculated when a file is loaded; images and other session data are not saved.")
         st.file_uploader("Load setup (JSON)", type=["json"], key="setup_upload",
                          help="Choosing a file does not change anything until you press Apply setup.")
         st.button("Apply setup", key="setup_apply", on_click=apply_setup,
                   disabled=st.session_state.get("setup_upload") is None)
-        st.caption("Applying a setup replaces the calculator, day/night and heatmap settings. Settings missing "
-                   "from the file return to their defaults; an invalid file changes nothing.")
+        st.caption("Applying a setup replaces the calculator, day/night and heatmap settings (and, for version-2 "
+                   "files, the comparison treatments and marker toggle). Settings missing from the file return to "
+                   "their defaults; an invalid file changes nothing. Version-1 files leave the comparison "
+                   "treatments unchanged.")
         _status = st.session_state.pop("_setup_status", None)
         if _status:
             (st.success if _status[0] == "ok" else st.error)(_status[1])
@@ -450,37 +492,6 @@ with tab_daynight:
 
     period_section("Day")
     period_section("Night")
-
-# ==========================================================================
-# Compare treatments
-# ==========================================================================
-with tab_compare:
-    st.subheader("Compare treatments")
-    st.caption("Edit the table to compare conditions side by side: add rows at the bottom, delete rows with the "
-               "row selector. Leaf temperature = air temperature + offset. Rows with missing or out-of-range "
-               "values are flagged and not calculated. This table is independent of the other tabs.")
-    st.session_state.setdefault("cmp_base", treatments.EXAMPLES.copy())      # unchanged base; edits live in the widget
-    edited = st.data_editor(
-        st.session_state["cmp_base"], num_rows="dynamic", hide_index=True, key="cmp_editor", width="stretch",
-        column_config={
-            treatments.NAME: st.column_config.TextColumn(treatments.NAME, required=False),
-            treatments.T_AIR: st.column_config.NumberColumn(treatments.T_AIR, format="%.1f", step=0.1),
-            treatments.RH: st.column_config.NumberColumn(treatments.RH, format="%.1f", step=0.1),
-            treatments.OFFSET: st.column_config.NumberColumn(treatments.OFFSET, format="%.1f", step=0.1),
-        })
-    compared = treatments.evaluate(edited)
-    st.markdown("**Results**")
-    st.dataframe(compared, hide_index=True, width="stretch", key="cmp_results",
-                 column_config={c: st.column_config.NumberColumn(c, format="%.1f")
-                                for c in (treatments.T_AIR, treatments.RH, treatments.OFFSET, *treatments.RESULTS)})
-    flagged = compared[compared[treatments.STATUS] != treatments.OK]
-    for _, row in flagged.iterrows():
-        (st.warning if row[treatments.STATUS] == treatments.CONDENSATION else st.error)(
-            f"{row[treatments.NAME] or 'Unnamed row'}: {row[treatments.STATUS]}")
-    st.download_button("Download comparison (CSV)", treatments.to_csv(compared), "vpd_treatment_comparison.csv",
-                       "text/csv", key="dl_compare_csv")
-    st.caption("The table shows one decimal; the CSV keeps full calculation precision.")
-
 
 # ==========================================================================
 # Heatmap
