@@ -47,16 +47,16 @@ def test_share_url_contains_query():
 
 # ---- acceptable range (day/night limits and one preset) --------------------------------------
 DN_STATE = STATE | {
-    "dn_lo_day": 1.0, "dn_hi_day": 1.0, "dn_kind_day": share.LEAF_LABEL,
-    "dn_lo_night": 0.6, "dn_hi_night": 1.0, "dn_kind_night": share.AIR_LABEL, "range_preset": presets.CUSTOM,
+    "dn_lo_day": 1.0, "dn_hi_day": 1.0,
+    "dn_lo_night": 0.6, "dn_hi_night": 1.0, "range_preset": presets.CUSTOM,
 }
 
 
 def test_range_round_trip_including_equal_limits_and_identity():
     params = share.build_params(DN_STATE)
-    assert {k: params[k] for k in ("dlo", "dhi", "dk", "nlo", "nhi", "nk", "rp")} == {
-        "dlo": "1", "dhi": "1", "dk": "leaf", "nlo": "0.6", "nhi": "1", "nk": "air", "rp": "custom"}
-    assert not {"dt", "doff", "nt", "noff", "dp", "np"} & set(params)
+    assert {k: params[k] for k in ("dlo", "dhi", "nlo", "nhi", "rp")} == {
+        "dlo": "1", "dhi": "1", "nlo": "0.6", "nhi": "1", "rp": "custom"}
+    assert not {"dt", "doff", "nt", "noff", "dp", "np", "dk", "nk"} & set(params)        # limits are canopy targets
     parsed = share.parse_params(params)
     for k, v in DN_STATE.items():
         if k != "calc_leaf_meas":
@@ -72,16 +72,16 @@ def test_legacy_and_partial_links_leave_the_range_untouched_and_old_condition_pa
     legacy = share.parse_params({"m": "b", "t": "25", "rh": "60", "tv": "1.1", "lo": "1.2", "hi": "1.5"})
     assert not any(k.startswith("dn_") for k in legacy)
     assert share.parse_params({"dt": "30", "doff": "-2", "nt": "10", "noff": "1", "dp": "veg", "np": "seed",
-                               "nk": "leaf"}) == {"dn_kind_night": share.LEAF_LABEL}
+                               "dk": "air", "nk": "leaf"}) == {}
 
 
 def test_build_params_omits_range_when_state_has_none():
-    assert not {"dlo", "dhi", "dk", "nlo", "nhi", "nk", "rp"} & set(share.build_params(STATE))
+    assert not {"dlo", "dhi", "nlo", "nhi", "rp"} & set(share.build_params(STATE))
 
 
 @pytest.mark.parametrize("bad", [
     {"dlo": "-0.1"}, {"dhi": "10.1"}, {"nlo": "1e999"}, {"nhi": "nan"}, {"dlo": "abc"}, {"dhi": ""},
-    {"dk": "water"}, {"nk": "AIR"}, {"dk": ""}, {"rp": "unknown"}, {"rp": "Vegetative"}, {"rp": "1"},
+    {"rp": "unknown"}, {"rp": "Vegetative"}, {"rp": "1"},
 ])
 def test_invalid_range_parameters_are_ignored(bad):
     assert share.parse_params(bad) == {}

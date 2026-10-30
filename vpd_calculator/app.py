@@ -233,7 +233,7 @@ with tab_calc:
     # The acceptable range of the chosen period (edited in the Acceptable range tab).
     p = period.lower()
     lo, hi = st.session_state[f"dn_lo_{p}"], st.session_state[f"dn_hi_{p}"]
-    ikind = kind_from_label(st.session_state.get(f"dn_kind_{p}", share.AIR_LABEL))
+    ikind = vpd.LEAF            # acceptable limits are canopy-VPD targets (equal-temperature reference, see presets)
     interval_ok = lo <= hi
 
     measured_in = leaf_method == share.MEASURED_METHOD
@@ -341,6 +341,7 @@ with tab_daynight:
 
     st.session_state["range_preset__w"] = st.session_state["range_preset"]
     st.selectbox("Range preset", presets.PRESET_NAMES, key="range_preset__w", on_change=apply_range_preset)
+    st.caption("Provisional canopy targets using an equal-temperature reference.")
     chosen = st.session_state["range_preset"]
     if chosen in presets.RANGE_PRESETS:
         a_, b_ = presets.preset_range(chosen)
@@ -349,24 +350,25 @@ with tab_daynight:
         st.caption("Edit the Day and Night limits below; the current limits are kept.")
     with st.expander("About these ranges"):
         st.markdown(presets.ABOUT_RANGES)
-        st.markdown("Runkle (2021) describes subjective classifications. The strawberry range is cited by Yamanaka "
-                    "et al. (2025) from Lieten (2002), not independently established by their experiment. "
-                    "Edit the limits for your crop and conditions.")
+        st.markdown(
+            "This equal-temperature reference is **this calculator's adaptation**, not a recommendation made by "
+            "the sources. Runkle (2021) describes subjective classifications. "
+            "[Lopez et al. (2026)](https://www.inside-grower.com/Article/?articleid=28096) is published greenhouse "
+            "guidance. [Yamanaka et al. (2025)](https://doi.org/10.2503/hortj.SZD-015) made air-based strawberry "
+            "measurements; its 0.8–1.2 kPa guidance cites Lieten (2002), not their own experiment. Saturation vapour "
+            "pressure follows [FAO-56, Eq. 11](https://www.fao.org/4/x0490e/x0490e07.htm).")
 
     def period_section(period: str):
         p_ = period.lower()
         with st.container(border=True):
             st.markdown(f"### {period}")
-            c1, c2, c3 = st.columns(3, gap="large")
+            c1, c2 = st.columns(2, gap="large")
             with c1:
                 dlo = linked(f"{period} lower limit (kPa)", f"dn_lo_{p_}", 0.0, 4.0, 0.05, fmt="%.2f", num_max=10.0,
                              after=range_edited)
             with c2:
                 dhi = linked(f"{period} upper limit (kPa)", f"dn_hi_{p_}", 0.0, 4.0, 0.05, fmt="%.2f", num_max=10.0,
                              after=range_edited)
-            with c3:
-                st.radio(f"{period} range applies to", [share.AIR_LABEL, share.LEAF_LABEL],
-                         key=f"dn_kind_{p_}", horizontal=True)
             if dlo > dhi:
                 st.error(f"{period}: lower limit must not exceed the upper limit.")
 
@@ -446,11 +448,11 @@ with tab_heat:
             st.caption("Negative canopy VPD (beyond the saturation line) indicates possible condensation.")
         if tg:
             if vpd.is_point_target(lo, hi):
-                st.caption(f"Dashed contour: user-defined single-value target **{ikind} VPD** "
+                st.caption(f"Dashed contour: user-defined single-value **canopy VPD** target "
                            f"{lo:.1f} kPa (the {period} target from the Acceptable range tab; "
                            f"colours show {hm_kind} VPD).")
             else:
-                st.caption(f"Dashed contours and light overlay: user-defined target **{ikind} VPD** range "
+                st.caption(f"Dashed contours and light overlay: user-defined **canopy VPD** target range "
                            f"{lo:.1f}-{hi:.1f} kPa (the {period} target from the Acceptable range tab; "
                            f"colours show {hm_kind} VPD).")
 
@@ -512,8 +514,9 @@ with tab_methods:
 - Required RH outside 0-100 % is reported as unattainable, never clipped.
 - Negative leaf VPD is allowed and flagged, since it indicates possible condensation on the leaf.
 - The FAO-56 equation is an empirical formula in air temperature only; it does not use atmospheric pressure. Results far outside typical growth-chamber temperatures have not been checked here.
-- Range presets adapt published VPD guidance into editable starting ranges (see the references below). Some
-  sources report air VPD; the values are **not** validated canopy-VPD optima. Custom ranges are yours to define.
+- Range presets adapt published VPD guidance into editable, fixed canopy-VPD targets using an explicit
+  equal-temperature reference (this calculator's adaptation, not a source recommendation); they are **not**
+  validated canopy-VPD optima. Custom ranges are yours to define.
 - The leaf-offset heatmap uses a constant offset across all air temperatures.
 - Values are displayed with one decimal place for readability; calculations, validation tables and CSV
   exports keep full precision.

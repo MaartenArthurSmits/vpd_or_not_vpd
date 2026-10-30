@@ -98,8 +98,6 @@ def parse_params(params: Mapping[str, str]) -> dict:
                     continue
                 if math.isfinite(v) and lo <= v <= hi:
                     out[pattern.format(p=period)] = v
-        if params.get(pre + "k") in _KIND:
-            out[f"dn_kind_{period}"] = _KIND[params[pre + "k"]]
     if params.get("rp") in presets.PRESET_IDS:
         out["range_preset"] = presets.PRESET_IDS[params["rp"]]           # identity only; limits are separate
     if "calc_leaf_meas" in out:
@@ -134,7 +132,6 @@ def build_params(state: Mapping) -> dict:
             continue
         for suffix, (pattern, _lo, _hi) in _PERIOD_NUMERIC.items():
             p[pre + suffix] = _fmt(state[pattern.format(p=period)])
-        p[pre + "k"] = "air" if state.get(f"dn_kind_{period}", AIR_LABEL) == AIR_LABEL else "leaf"
     if state.get("range_preset") in ids:
         p["rp"] = ids[state["range_preset"]]
     # Heatmap controls. Their widgets are created after this runs on a fresh session, so fall back to the

@@ -63,7 +63,7 @@ def test_default_run_has_no_exceptions_and_known_values():
     assert not at.exception
     assert at.radio(key="mode").value == share.MODE_A
     assert live_values(at) == {"rh": 60.0, "t_air": 22.0, "calc_offset": -1.0}      # fresh default offset
-    assert live(at)["target"] == {"lo": 0.7, "hi": 1.3, "kind": "air", "period": "Day"}
+    assert live(at)["target"] == {"lo": 0.7, "hi": 1.3, "kind": "leaf", "period": "Day"}
     assert at.selectbox(key="range_preset__w").value == presets.DEFAULT_PRESET
 
 
@@ -386,7 +386,7 @@ def es_hand(t):                                  # stand-alone FAO-56 Eq. 11, in
     return 0.6108 * math.exp(17.27 * t / (t + 237.3))
 
 
-ACCEPTANCE = {"dlo": "1.0", "dhi": "1.0", "dk": "leaf", "nlo": "0.6", "nhi": "1.0", "nk": "air", "rp": "custom"}
+ACCEPTANCE = {"dlo": "1.0", "dhi": "1.0", "nlo": "0.6", "nhi": "1.0", "rp": "custom"}
 OBSOLETE = {"dt": "33", "doff": "-2", "nt": "12", "noff": "1", "dp": "veg", "np": "seed"}      # old per-period parameters
 
 
@@ -452,9 +452,8 @@ def test_heatmap_link_restores_controls_and_chart_alongside_other_settings():
     s = at.session_state
     assert (s["t_air"], s["rh"], s["vpd_lo"], s["vpd_hi"], s["calc_offset"]) == (25.0, 40.0, 0.9, 1.3, -2.0)
     assert s["interval_kind"] == share.LEAF_LABEL
-    assert (s["dn_lo_day"], s["dn_hi_day"], s["dn_kind_day"], s["range_preset"]) == (
-        1.0, 1.0, share.LEAF_LABEL, presets.CUSTOM)
-    assert (s["dn_lo_night"], s["dn_hi_night"], s["dn_kind_night"]) == (0.6, 1.0, share.AIR_LABEL)
+    assert (s["dn_lo_day"], s["dn_hi_day"], s["range_preset"]) == (1.0, 1.0, presets.CUSTOM)
+    assert (s["dn_lo_night"], s["dn_hi_night"]) == (0.6, 1.0)
 
 
 def test_heatmap_toggles_on_restore_target_and_point_layers():
@@ -549,10 +548,10 @@ def test_heatmap_leaf_assumption_caption_for_leaf_colours_and_leaf_targets():
     at = app_with_params({"hk": "leaf", "off": "-2"})                       # leaf heatmap, offset input
     (note,) = leaf_note(at)
     assert "-2.0 °C" in note and "air temperature − 2.0 °C throughout this chart" in note and "derived" not in note
-    at = app_with_params({"hk": "air", "dk": "leaf", "hg": "1", "off": "-2"})   # air heatmap, leaf target shown
+    at = app_with_params({"hk": "air", "hg": "1", "off": "-2"})   # air heatmap, canopy target shown
     assert len(leaf_note(at)) == 1
     # measured leaf temperature: 22 degC air, 20 degC leaf -> -2 degC offset, explained
-    at = app_with_params({"hk": "air", "dk": "leaf", "t": "22", "lm": "20"})
+    at = app_with_params({"hk": "air", "t": "22", "lm": "20"})
     (note,) = leaf_note(at)
     assert "-2.0 °C" in note and "air temperature − 2.0 °C throughout this chart" in note
     assert "30 °C" not in note
@@ -569,9 +568,8 @@ def test_heatmap_condensation_note_only_when_the_zero_line_is_drawn():
 
 
 def test_heatmap_leaf_assumption_caption_absent_without_leaf_use():
-    assert leaf_note(app_with_params({"hk": "air", "dk": "air", "off": "-2"})) == []      # air chart, air target
-    assert leaf_note(app_with_params({"hk": "air", "dk": "leaf", "hg": "0", "off": "-2"})) == []  # target hidden
-    assert leaf_note(app_with_params({"hk": "air", "dk": "leaf", "dlo": "1.5", "dhi": "0.5"})) == []  # invalid range
+    assert leaf_note(app_with_params({"hk": "air", "hg": "0", "off": "-2"})) == []  # target hidden
+    assert leaf_note(app_with_params({"hk": "air", "dlo": "1.5", "dhi": "0.5"})) == []  # invalid range
 
 
 # ---- heatmap figure downloads (PNG, PDF, SVG) and their cache -----------------------------------------
@@ -597,6 +595,7 @@ def test_heatmap_svg_download_is_offered_with_png_and_pdf_and_follows_the_settin
     calls = capture_heatmap_downloads(monkeypatch)
     at = new_app().run()
     assert heatmap_downloads(at) == set()                                   # nothing before preparing
+    at.checkbox(key="hm_target").set_value(False).run()                     # the (canopy) target overlay is not drawn
     at.button(key="png_prepare").click().run()
     assert not at.exception and heatmap_downloads(at) == {"Download PNG", "Download PDF", "Download SVG"}
     assert (calls["Download SVG"]["file_name"], calls["Download SVG"]["mime"]) == ("vpd_heatmap.svg", "image/svg+xml")
@@ -748,7 +747,8 @@ def test_treatment_markers_without_leaf_vpd_in_the_chart_need_no_offset_explanat
     at = new_app()
     at.session_state["cmp_editor"] = {"edited_rows": {0: {treat.OFFSET: -2.0}}, "added_rows": [], "deleted_rows": []}
     at.run()
-    at.checkbox(key="hm_treatments").set_value(True).run()                              # air heatmap, air target
+    at.checkbox(key="hm_target").set_value(False).run()                                 # no canopy-target overlay
+    at.checkbox(key="hm_treatments").set_value(True).run()                              # air heatmap only
     assert len(treatment_trace(at)) == 1 and "Marker values use" not in heatmap_captions(at)
 
 
@@ -826,7 +826,7 @@ def test_changing_bounds_does_not_change_calculator_conditions_and_panels_match(
     set_num(at, "dn_hi_day", 0.9)                                             # equal bounds are supported
     assert live_values(at) == before
     cal, rng = [(p["target"], p["inputs"], p["mode"]) for p in panel_payloads(at)]
-    assert cal == rng and cal[0] == {"lo": 0.9, "hi": 0.9, "kind": "air", "period": "Day"}
+    assert cal == rng and cal[0] == {"lo": 0.9, "hi": 0.9, "kind": "leaf", "period": "Day"}
     assert [p.get("readonly") for p in panel_payloads(at)] == [None, True]
     at.radio(key="calc_period__r").set_value("Night").run()                  # period is mirrored between the tabs
     assert at.radio(key="calc_period").value == "Night"
@@ -884,3 +884,17 @@ def test_copy_link_reflects_latest_range_edits_and_the_url_is_not_shown():
     assert url == share.share_url(at.session_state) and "nlo=0.55" in url
     assert "Share your current settings." in [c.value for c in at.tabs[1].caption]
     assert not any("?" in x.value and "http" in x.value for x in at.code)
+
+
+def test_preset_limits_stay_fixed_canopy_targets_while_temperatures_change():
+    at = new_app().run()
+    at.selectbox(key="range_preset__w").set_value(presets.PRESET_NAMES[6]).run()          # strawberry 0.80-1.20 kPa
+    at.radio(key="mode").set_value(share.MODE_B).run()
+    set_num(at, "target_vpd", 1.0)
+    for t_air, t_leaf, rh in ((22.0, 21.0, 56.2), (33.0, 32.0, 74.6)):
+        set_num(at, "t_air", t_air)
+        set_num(at, "calc_offset", t_leaf - t_air)
+        assert live(at)["target"] == {"lo": 0.8, "hi": 1.2, "kind": "leaf", "period": "Day"}
+        assert round(vpd.calculate_required_rh(t_air, 1.0, vpd.LEAF, t_leaf - t_air).rh, 1) == rh
+        assert limits(at) == ((0.8, 1.2), (0.8, 1.2)) and live_values(at)["calc_offset"] == t_leaf - t_air
+    assert any("Provisional canopy targets using an equal-temperature reference." in c.value for c in at.tabs[1].caption)

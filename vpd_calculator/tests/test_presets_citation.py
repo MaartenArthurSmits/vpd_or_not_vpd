@@ -40,7 +40,8 @@ def test_preset_matching_and_custom_fallback():
 
 
 def test_adaptation_statement_is_explicit_and_sources_are_in_the_references():
-    assert "not validated canopy-VPD optima" in presets.ABOUT_RANGES and "adapt published VPD guidance" in presets.ABOUT_RANGES
+    assert "leaf temperature equals air temperature" in presets.ABOUT_RANGES and "validated these ranges as canopy-VPD optima" in presets.ABOUT_RANGES
+    assert "limits then remain fixed" in presets.ABOUT_RANGES
     app = (ROOT / "app.py").read_text(encoding="utf-8")
     for needle in ("Yamanaka, R.", "Lopez, R.", "Runkle, E. S. (2021", "Runkle, E. S. (2022", "Wollaeger, H.", "ASHRAE. (2023)", "Bayer. (2020"):
         assert needle in app, needle
