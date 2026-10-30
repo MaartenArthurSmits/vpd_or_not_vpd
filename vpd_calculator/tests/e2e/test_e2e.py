@@ -7,6 +7,7 @@ import subprocess
 
 import pandas as pd
 import pytest
+from playwright.sync_api import expect
 
 import share
 import vpd
@@ -125,7 +126,7 @@ def test_acceptable_range_tab_edits_limits_and_shows_the_calculator_result(page)
     page.get_by_text("Range preset").first.wait_for(timeout=TIMEOUT)
     assert num(page, "Day lower limit (kPa)").input_value() == "0.70"
     set_number(page, "Night upper limit (kPa)", 1.1)
-    page.wait_for_function("() => [...document.querySelectorAll('input[type=number]')].some(i => i.value === '1.10')")
+    expect(num(page, "Night upper limit (kPa)")).to_have_value("1.10", timeout=TIMEOUT)
     assert num(page, "Day upper limit (kPa)").input_value() == "1.30"            # the other period is unchanged
     assert page.locator(".status").locator("visible=true").count() == 2          # one result bar per period
     open_tab(page, "Calculator")                                                  # settings survive tab changes
