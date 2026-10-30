@@ -112,10 +112,12 @@ def test_pulse_grow_attribution_is_not_claimed_for_equations():
     assert "Pulse Grow" in text and "not" in text.split("Pulse Grow", 1)[1][:400].lower()
 
 
-def test_footer_text_and_links_come_from_the_citation_metadata():
+def test_footer_text_and_citation_come_from_the_citation_metadata():
     footer = citation.footer_markdown()
-    assert footer.startswith("© 2026 Maarten Arthur Smits · Code: [MIT licence](")
-    assert f"({citation.REPO_URL}/blob/main/LICENSE)" in footer and f"[Cite this calculator]({citation.REPO_URL}/blob/main/CITATION.cff)" in footer
+    assert footer == f"© 2026 Maarten Arthur Smits · Code: [MIT licence]({citation.REPO_URL}/blob/main/LICENSE)"
+    assert citation.apa_footer_plain() == ("Smits, M. A. (2026). VPD Calculator (Version 1.0.0) [Computer software]. "
+                                           "https://vpd-or-not-vpd.streamlit.app/")
+    assert citation.apa_footer_markdown() == citation.apa_footer_plain().replace("VPD Calculator", "*VPD Calculator*", 1)
     assert (REPO / "LICENSE").exists() and (REPO / "CITATION.cff").exists()
 
 
@@ -124,7 +126,7 @@ def test_bibliography_is_alphabetical_complete_and_free_of_commentary():
     block = app.split("**References** (APA 7)")[1].split("How to cite this software")[0]
     entries = [l[2:] for l in block.split("\n") if l.startswith("- ")]
     keys = [e.split("(")[0].strip(" .,").lower() for e in entries]
-    assert keys == sorted(keys) and len(entries) == 14
+    assert keys == sorted(keys) and len(entries) == 13
     assert "not a source for the equations" not in app and "Wollaeger" not in app
     for e in entries:
         assert "https://" in e and not e.rstrip().endswith(")") or e.rstrip().endswith(("html", "pdf", "aspx", "htm", "540166")) or "doi.org" in e or "articleid" in e or e.rstrip().endswith("Pdf")

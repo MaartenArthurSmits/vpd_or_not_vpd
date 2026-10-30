@@ -9,86 +9,78 @@ import plotly.graph_objects as go
 import rangecolor
 import vpd
 
-COLORSCALES = ["RdYlBu_r", "Viridis", "Turbo", "Cividis", "Plasma", "YlGnBu", "Spectral_r", "Greys"]
+COLORSCALES = rangecolor.PALETTES
 
 
-def heatmap_figure(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0,
-                   colorscale="RdYlBu_r", contour_step=0.5, z_max=None,
+def contour_level_ranges(z_min, z_max, step, skip_zero):
+    """(start, end) ranges of the ordinary contour levels; level 0 is left out when the saturation line is drawn."""
+    start = np.ceil(z_min / step) * step
+    if start - z_min < 1e-9:        # a contour on the data minimum is only an edge artefact
+        start += step
+    if not skip_zero or start > 0 or z_max < 0:
+        return [(float(start), float(z_max))]
+    ranges = []
+    if start <= -step + 1e-9:
+        ranges.append((float(start), float(-step)))
+    if z_max >= step - 1e-9:
+        ranges.append((float(step), float(z_max)))
+    return ranges
+
+
+def heatmap_figure(t_min, t_max, rh_min, rh_max, kind=vpd.LEAF, offset=0.0,
+                   colorscale=rangecolor.DEFAULT_PALETTE, contour_step=0.5, z_max=None,
                    point=None, target=None, template=None,
-                   width=None, height=650, target_kind=None, range_colour=False) -> go.Figure:
-    """Temperature x RH heatmap with labelled contours.
+                   width=None, height=650, target_kind=None, anchor=None) -> go.Figure:
+    """Temperature x RH heatmap with labelled contours (canopy VPD by default).
 
     point  : (t_air, rh) selected state or None
-    target : (vpd_low, vpd_high) user-defined interval or None
-    range_colour : colour by distance from the target range (canopy VPD with a canopy target only; see rangecolor).
-    target_kind : VPD type the target interval refers to (default: same as `kind`). The colours
-                  follow `kind`; the target shading and dashed contours follow `target_kind`.
+    target : (vpd_low, vpd_high) dashed boundary lines or None (no colour band is drawn)
+    anchor : (vpd_low, vpd_high) acceptable range that positions the palette (see rangecolor.mapping) or None
+    z_max  : manual colour maximum (ignored when it does not clear the upper anchor)
+    target_kind : VPD type the target interval refers to (default: same as `kind`).
     """
     temps = np.arange(t_min, t_max + 1e-9, 0.25)
     rhs = np.arange(rh_min, rh_max + 1e-9, 0.5)
     z = vpd.vpd_matrix(temps, rhs, kind, offset)
     label = "Air VPD" if kind == vpd.AIR else "Canopy VPD"
-    zmin = float(np.floor(z.min() * 2) / 2) if z.min() < 0 else 0.0
-    zmax = float(z_max) if z_max else float(z.max())
     tkind = kind if target_kind is None else target_kind
     zt = z if tkind == kind else vpd.vpd_matrix(temps, rhs, tkind, offset)
+    anchored = anchor is not None and kind == vpd.LEAF
+    m = rangecolor.mapping(float(z.min()), float(z.max()), *(anchor if anchored else (None, None)), z_max=z_max)
+    dec = 2 if m["anchored"] else 1
+    zero_line = kind == vpd.LEAF and vpd.zero_boundary_in_range(z)
 
-    rc = bool(range_colour and kind == vpd.LEAF and target is not None and tkind == vpd.LEAF)
-    dec = 2 if rc else 1
     fig = go.Figure()
-    if rc:      # fixed-kPa colour scale: green inside the range, warmer with distance outside; real VPD in bar/hover
-        lo_c, hi_c = target
-        cmin, cmax = rangecolor.domain(lo_c, hi_c)
-        point_t = vpd.is_point_target(lo_c, hi_c)
-        ticks = [(cmin, f"{cmin:.2f} or lower"), (lo_c, f"{lo_c:.2f} " + ("target" if point_t else "lower limit"))]
-        if not point_t:
-            ticks.append((hi_c, f"{hi_c:.2f} upper limit"))
-        ticks.append((cmax, f"{cmax:.2f} or higher"))
-        fig.add_trace(go.Heatmap(
-            z=z, x=temps, y=rhs, colorscale=[list(s) for s in rangecolor.colorscale(lo_c, hi_c)], zmin=cmin, zmax=cmax,
-            colorbar=dict(title=dict(text=f"{label} (kPa)"), tickmode="array", tickvals=[v for v, _ in ticks],
-                          ticktext=[s for _, s in ticks]),
-            hovertemplate="Temperature: %{x:.1f} °C<br>RH: %{y:.1f} %<br>" + label + ": %{z:.2f} kPa<extra></extra>",
-            name=label,
-        ))
-        for name, symbol, colour in (("Below range: VPD under the lower limit", "triangle-down", rangecolor.LOW_COLOUR),
-                                     ("Above range: VPD over the upper limit", "triangle-up", rangecolor.HIGH_COLOUR)):
+    colorbar = dict(title=dict(text=f"{label} (kPa)"))
+    if m["anchored"]:
+        tk = rangecolor.ticks(m)
+        colorbar |= dict(tickmode="array", tickvals=[v for v, _ in tk], ticktext=[s for _, s in tk])
+    fig.add_trace(go.Heatmap(
+        z=z, x=temps, y=rhs, colorscale=[list(s) for s in rangecolor.stops(colorscale, m)], zmin=m["cmin"], zmax=m["cmax"],
+        colorbar=colorbar,
+        hovertemplate="Temperature: %{x:.1f} °C<br>RH: %{y:.1f} %<br>" + label + f": %{{z:.{dec}f}} kPa<extra></extra>",
+        name=label,
+    ))
+    if m["anchored"]:           # legend entries for the two sides of the range, in the palette's end colours
+        lut = rangecolor.palette_lut(colorscale)
+        for name, symbol, colour in (("Below range: VPD under the lower limit", "triangle-down", lut[0]),
+                                     ("Above range: VPD over the upper limit", "triangle-up", lut[-1])):
             fig.add_trace(go.Scatter(x=[None], y=[None], mode="markers", name=name, showlegend=True, hoverinfo="skip",
                                      marker=dict(symbol=symbol, size=11, color=colour, line=dict(color="black", width=1))))
-    else:
-        fig.add_trace(go.Heatmap(
-            z=z, x=temps, y=rhs, colorscale=colorscale, zmin=zmin, zmax=zmax,
-            colorbar=dict(title=dict(text=f"{label} (kPa)")),
-            hovertemplate="Temperature: %{x:.1f} °C<br>RH: %{y:.1f} %<br>"
-                          + label + ": %{z:.1f} kPa<extra></extra>",
-            name=label,
+
+    for start, end in contour_level_ranges(float(z.min()), float(z_max) if z_max else float(z.max()), contour_step, zero_line):
+        fig.add_trace(go.Contour(
+            z=z, x=temps, y=rhs, showscale=False, hoverinfo="skip", ncontours=None,
+            contours=dict(coloring="lines", showlabels=True, start=start, end=end,
+                          size=contour_step, labelfont=dict(size=11, color="black"), labelformat=f".{dec}f"),
+            line=dict(width=1), colorscale=[[0, "rgba(0,0,0,0.55)"], [1, "rgba(0,0,0,0.55)"]],
         ))
 
-    if not rc and target is not None and not vpd.is_point_target(*target):     # a single value has no band to shade
-        lo, hi = target
-        mask = np.where((zt >= lo) & (zt <= hi), 1.0, np.nan)
-        fig.add_trace(go.Heatmap(
-            z=mask, x=temps, y=rhs, zmin=0, zmax=1, showscale=False, hoverinfo="skip",
-            name=f"{vpd.target_label(tkind, lo, hi)} (overlay)",
-            colorscale=[[0, "rgba(255,255,255,0.45)"], [1, "rgba(255,255,255,0.45)"]],
-        ))
-
-    start = np.ceil(z.min() / contour_step) * contour_step
-    if start - z.min() < 1e-9:      # a contour on the data minimum is only an edge artefact
-        start += contour_step
-    fig.add_trace(go.Contour(
-        z=z, x=temps, y=rhs, showscale=False, hoverinfo="skip", ncontours=None,
-        contours=dict(coloring="lines", showlabels=True, start=start, end=zmax,
-                      size=contour_step, labelfont=dict(size=11, color="black"),
-                      labelformat=f".{dec}f"),
-        line=dict(width=1), colorscale=[[0, "rgba(0,0,0,0.55)"], [1, "rgba(0,0,0,0.55)"]],
-    ))
-
-    if kind == vpd.LEAF and vpd.zero_boundary_in_range(z):       # leaf saturation boundary (existing grid)
+    if zero_line:       # canopy saturation boundary: thin neutral dotted line, drawn only where zero crosses the grid
         fig.add_trace(go.Contour(
             z=z, x=temps, y=rhs, showscale=False, hoverinfo="skip",
             contours=dict(coloring="lines", showlabels=False, start=0.0, end=0.0, size=1.0),
-            line=dict(width=4, color=vpd.ZERO_COLOUR), colorscale=[[0, vpd.ZERO_COLOUR], [1, vpd.ZERO_COLOUR]],
+            line=dict(width=1.5, color=vpd.ZERO_COLOUR, dash="dot"), colorscale=[[0, vpd.ZERO_COLOUR], [1, vpd.ZERO_COLOUR]],
             name=vpd.ZERO_LABEL, showlegend=True,
         ))
 

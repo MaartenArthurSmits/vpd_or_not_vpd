@@ -103,16 +103,16 @@ def test_resolve_preset_keeps_identity_when_it_still_fits_and_never_changes_limi
 
 # ---- heatmap settings ----------------------------------------------------------------------
 HM_STATE = DN_STATE | {
-    "hm_kind": share.LEAF_LABEL, "hm_tmin": 12.5, "hm_tmax": 38.0, "hm_rhmin": 25.0, "hm_rhmax": 95.0,
+    "hm_tmin": 12.5, "hm_tmax": 38.0, "hm_rhmin": 25.0, "hm_rhmax": 95.0,
     "hm_cs": "Viridis", "hm_zmax": 3.5, "hm_step": 0.2, "hm_target": False, "hm_point": False,
 }
-HM_KEYS = ("htmin", "htmax", "hrmin", "hrmax", "hz", "hk", "hcs", "hst", "hg", "hp")
+HM_KEYS = ("htmin", "htmax", "hrmin", "hrmax", "hz", "hcs", "hst", "hg", "hp")
 
 
 def test_heatmap_round_trip_alongside_calculator_and_day_night():
     params = share.build_params(HM_STATE)
     assert {k: params[k] for k in HM_KEYS} == {
-        "htmin": "12.5", "htmax": "38", "hrmin": "25", "hrmax": "95", "hz": "3.5", "hk": "leaf",
+        "htmin": "12.5", "htmax": "38", "hrmin": "25", "hrmax": "95", "hz": "3.5",
         "hcs": "Viridis", "hst": "0.2", "hg": "0", "hp": "0"}
     parsed = share.parse_params(params)
     for k, v in HM_STATE.items():
@@ -141,8 +141,8 @@ def test_build_params_before_heatmap_widgets_exist_uses_control_defaults():
     """On a fresh session the URL is built before the heatmap widgets are created (and partial links set only some)."""
     params = share.build_params(DN_STATE)
     assert {k: params[k] for k in HM_KEYS} == {
-        "htmin": "10", "htmax": "40", "hrmin": "10", "hrmax": "100", "hz": "0", "hk": "leaf",
-        "hcs": "RdYlBu_r", "hst": "0.5", "hg": "1", "hp": "1"}
+        "htmin": "10", "htmax": "40", "hrmin": "10", "hrmax": "100", "hz": "0",
+        "hcs": "Blue–green–red", "hst": "0.5", "hg": "1", "hp": "1"}
     partial = share.build_params(DN_STATE | {"hm_tmin": 15.0})        # only one heatmap key present: no KeyError
     assert partial["htmin"] == "15" and partial["htmax"] == "40"
     parsed = share.parse_params(params)
@@ -154,7 +154,7 @@ def test_build_params_before_heatmap_widgets_exist_uses_control_defaults():
 @pytest.mark.parametrize("bad", [
     {"htmin": "abc"}, {"htmin": "nan"}, {"htmax": "inf"}, {"htmin": "-10.1"}, {"htmax": "60.1"},
     {"hrmin": "-1"}, {"hrmin": "99.5"}, {"hrmax": "0.5"}, {"hrmax": "101"}, {"hz": "-1"}, {"hz": "21"},
-    {"hz": "1e999"}, {"hk": "water"}, {"hk": "AIR"}, {"hcs": "rainbow"}, {"hcs": "viridis"}, {"hcs": ""},
+    {"hz": "1e999"}, {"hcs": "rainbow"}, {"hcs": "viridis"}, {"hcs": ""},
     {"hst": "0.3"}, {"hst": "nan"}, {"hst": "x"}, {"hst": ""}, {"hg": "true"}, {"hg": "2"}, {"hp": ""},
 ])
 def test_invalid_heatmap_parameters_are_ignored(bad):
@@ -164,3 +164,9 @@ def test_invalid_heatmap_parameters_are_ignored(bad):
 def test_heatmap_bounds_are_inclusive_and_not_clamped():
     ok = share.parse_params({"htmin": "-10", "htmax": "60", "hrmin": "0", "hrmax": "100", "hz": "0"})
     assert ok == {"hm_tmin": -10.0, "hm_tmax": 60.0, "hm_rhmin": 0.0, "hm_rhmax": 100.0, "hm_zmax": 0.0}
+
+
+def test_old_air_heatmap_parameter_is_ignored_and_not_written():
+    assert share.parse_params({"hk": "air", "t": "25"}) == {"t_air": 25.0}
+    assert "hk" not in share.build_params(HM_STATE)
+    assert share.parse_params({"hcs": "Blue–green–red"}) == {"hm_cs": "Blue–green–red"} and share.HEATMAP_DEFAULTS["hm_cs"] == "Blue–green–red"

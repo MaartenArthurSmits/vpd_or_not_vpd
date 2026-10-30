@@ -238,8 +238,7 @@ def test_query_params_follow_state():
 # ---- heatmap and methods tabs ---------------------------------------------------------------------------
 def test_heatmap_tab_controls_and_validation():
     at = new_app().run()
-    assert at.radio(key="hm_kind").value == share.LEAF_LABEL and not any(w.key == "hm_cs" for w in at.selectbox)
-    at.radio(key="hm_kind").set_value(share.AIR_LABEL).run()                 # palette controls return for the Air view
+    assert not any(r.key == "hm_kind" for r in at.radio) and at.selectbox(key="hm_cs").value == "Blue–green–red"
     at.selectbox(key="hm_cs").set_value("Viridis").run()
     at.number_input(key="hm_tmin").set_value(35.0).run()
     assert not at.exception
@@ -431,8 +430,8 @@ def test_heatmap_link_restores_controls_and_chart_alongside_other_settings():
     params = ACCEPTANCE | {"t": "25", "rh": "40", "lo": "0.9", "hi": "1.3", "ik": "leaf", "off": "-2"} | HEATMAP_LINK
     at = app_with_params(params)
     assert not at.exception
-    # heatmap controls
-    assert at.radio(key="hm_kind").value == share.LEAF_LABEL
+    # heatmap controls (the old hk parameter is ignored; the heatmap is canopy-only and has no VPD-type selector)
+    assert not any(r.key == "hm_kind" for r in at.radio)
     assert (at.number_input(key="hm_tmin").value, at.number_input(key="hm_tmax").value) == (12.0, 38.0)
     assert (at.number_input(key="hm_rhmin").value, at.number_input(key="hm_rhmax").value) == (25.0, 95.0)
     assert at.number_input(key="hm_zmax").value == 3.5
@@ -446,10 +445,10 @@ def test_heatmap_link_restores_controls_and_chart_alongside_other_settings():
     heat = spec["data"][0]
     assert heat["zmax"] == 3.5 and heat["colorbar"]["title"]["text"] == "Canopy VPD (kPa)"
     assert heat["colorscale"][0][1] == "#440154"                                   # Viridis
-    # no target layers or point; the extra contour is the leaf VPD = 0 line (-2 degC offset crosses the chart)
-    assert [d["type"] for d in spec["data"]] == ["heatmap", "contour", "contour"]
-    assert spec["data"][2]["name"] == "Leaf saturation: VPD = 0 kPa"
-    assert spec["data"][1]["contours"]["size"] == 0.2
+    # boundaries are off, so there is no target line; the saturation boundary is a thin dotted neutral line
+    names = [d.get("name") for d in spec["data"]]
+    assert vpd.ZERO_LABEL in names and not any(n and n.startswith("Target") for n in names)
+    assert all(d.get("contours", {}).get("size") in (None, 0.2, 1.0) for d in spec["data"] if d["type"] == "contour")
     # calculator and day/night settings are restored as well
     s = at.session_state
     assert (s["t_air"], s["rh"], s["vpd_lo"], s["vpd_hi"], s["calc_offset"]) == (25.0, 40.0, 0.9, 1.3, -2.0)
@@ -459,29 +458,29 @@ def test_heatmap_link_restores_controls_and_chart_alongside_other_settings():
 
 
 def test_heatmap_toggles_on_restore_target_and_point_layers():
-    at = app_with_params({"hg": "1", "hp": "1", "ik": "leaf", "lo": "0.8", "hi": "1.2", "hk": "air"})
-    kinds = [d["type"] for d in heatmap_spec(at)["data"]]
-    assert kinds == ["heatmap", "heatmap", "contour", "contour", "scatter"]
+    at = app_with_params({"hg": "1", "hp": "1", "ik": "leaf", "lo": "0.8", "hi": "1.2", "hk": "air"})   # hk=air is ignored
+    spec = heatmap_spec(at)
+    assert "Canopy VPD" in spec["layout"]["title"]["text"]
+    names = [d.get("name") for d in spec["data"]]
+    assert "Target Canopy VPD 0.70-1.30 kPa" in names and "Selected" in names and not any(n and "overlay" in n for n in names)
 
 
 def test_app_url_round_trip_of_heatmap_settings_into_a_fresh_session():
     at = new_app().run()
-    at.radio(key="hm_kind").set_value(share.AIR_LABEL).run()
     at.number_input(key="hm_tmin").set_value(15.0).run()
     at.number_input(key="hm_rhmax").set_value(90.0).run()
     at.selectbox(key="hm_cs").set_value("Turbo").run()
     at.selectbox(key="hm_step").set_value(0.1).run()
     at.number_input(key="hm_zmax").set_value(4.0).run()
     at.checkbox(key="hm_point").set_value(False).run()
-    at.radio(key="hm_kind").set_value(share.LEAF_LABEL).run()               # canopy range colouring hides the palette controls
     assert at.session_state["hm_cs"] == "Turbo" and at.session_state["hm_zmax"] == 4.0 and qp(at, "hcs") == "Turbo"
     set_num(at, "t_air", 27.0)
     set_num(at, "dn_lo_night", 0.55)
     link = {k: qp(at, k) for k in at.query_params}
-    assert {"hk", "htmin", "htmax", "hrmin", "hrmax", "hz", "hcs", "hst", "hg", "hp"} <= set(link)
+    assert {"htmin", "htmax", "hrmin", "hrmax", "hz", "hcs", "hst", "hg", "hp"} <= set(link) and "hk" not in link
     fresh = app_with_params(link)
     assert not fresh.exception
-    for key in ("hm_kind", "hm_tmin", "hm_tmax", "hm_rhmin", "hm_rhmax", "hm_cs", "hm_step", "hm_zmax",
+    for key in ("hm_tmin", "hm_tmax", "hm_rhmin", "hm_rhmax", "hm_cs", "hm_step", "hm_zmax",
                 "hm_target", "hm_point", "t_air", "dn_lo_night"):
         assert fresh.session_state[key] == at.session_state[key], key
     assert heatmap_spec(fresh)["layout"] == heatmap_spec(at)["layout"]
@@ -489,7 +488,6 @@ def test_app_url_round_trip_of_heatmap_settings_into_a_fresh_session():
 
 def test_editing_heatmap_settings_updates_url_without_touching_other_settings():
     at = new_app().run()
-    at.radio(key="hm_kind").set_value(share.AIR_LABEL).run()
     before = {k: qp(at, k) for k in ("t", "rh", "nlo", "dlo", "nhi")}
     at.selectbox(key="hm_cs").set_value("Plasma").run()
     at.checkbox(key="hm_target").set_value(False).run()
@@ -498,13 +496,12 @@ def test_editing_heatmap_settings_updates_url_without_touching_other_settings():
 
 
 def test_legacy_link_keeps_heatmap_defaults():
-    assert app_with_params({"t": "25"}).radio(key="hm_kind").value == share.LEAF_LABEL           # canopy by default
-    at = app_with_params(ACCEPTANCE | {"t": "25", "hk": "air"})                                  # restored Air is kept
-    assert not at.exception
-    assert at.radio(key="hm_kind").value == share.AIR_LABEL
+    at = app_with_params(ACCEPTANCE | {"t": "25", "hk": "air"})                                  # old hk=air: canopy heatmap
+    assert not at.exception and "Canopy VPD" in heatmap_spec(at)["layout"]["title"]["text"]
+    assert at.selectbox(key="hm_cs").value == "Blue–green–red"
     assert (at.number_input(key="hm_tmin").value, at.number_input(key="hm_tmax").value) == (10.0, 40.0)
     assert (at.number_input(key="hm_rhmin").value, at.number_input(key="hm_rhmax").value) == (10.0, 100.0)
-    assert at.selectbox(key="hm_cs").value == "RdYlBu_r" and at.selectbox(key="hm_step").value == 0.5
+    assert at.selectbox(key="hm_cs").value == "Blue–green–red" and at.selectbox(key="hm_step").value == 0.5
     assert at.number_input(key="hm_zmax").value == 0.0
     assert at.checkbox(key="hm_target").value is True and at.checkbox(key="hm_point").value is True
 
@@ -517,29 +514,25 @@ def test_legacy_link_keeps_heatmap_defaults():
 def test_invalid_heatmap_link_parameters_fall_back_to_defaults_without_error(bad):
     at = app_with_params(bad)
     assert not at.exception
-    assert at.radio(key="hm_kind").value == share.LEAF_LABEL
-    at.radio(key="hm_kind").set_value(share.AIR_LABEL).run()
     assert (at.number_input(key="hm_tmin").value, at.number_input(key="hm_tmax").value) == (10.0, 40.0)
     assert (at.number_input(key="hm_rhmin").value, at.number_input(key="hm_rhmax").value) == (10.0, 100.0)
     assert at.number_input(key="hm_zmax").value == 0.0
-    assert at.selectbox(key="hm_cs").value == "RdYlBu_r" and at.selectbox(key="hm_step").value == 0.5
+    assert at.selectbox(key="hm_cs").value == "Blue–green–red" and at.selectbox(key="hm_step").value == 0.5
     assert at.checkbox(key="hm_target").value and at.checkbox(key="hm_point").value
 
 
 def test_heatmap_share_defaults_match_the_widget_defaults():
     at = new_app().run()
-    assert at.radio(key="hm_kind").value == share.LEAF_LABEL
-    at.radio(key="hm_kind").set_value(share.AIR_LABEL).run()
     widgets = {"hm_tmin": at.number_input, "hm_tmax": at.number_input, "hm_rhmin": at.number_input,
                "hm_rhmax": at.number_input, "hm_zmax": at.number_input, "hm_cs": at.selectbox,
                "hm_step": at.selectbox, "hm_target": at.checkbox, "hm_point": at.checkbox}
     for key, default in share.HEATMAP_DEFAULTS.items():
         assert widgets[key](key=key).value == default, key
     # a fresh session already exposes the complete heatmap parameter set in the URL
-    assert {"hk", "htmin", "htmax", "hrmin", "hrmax", "hz", "hcs", "hst", "hg", "hp"} <= set(at.query_params)
+    assert {"htmin", "htmax", "hrmin", "hrmax", "hz", "hcs", "hst", "hg", "hp"} <= set(at.query_params)
 
 
-@pytest.mark.parametrize("partial", [{"htmin": "15"}, {"hz": "2.5"}, {"hcs": "Plasma", "hg": "0"}, {"hk": "leaf"}])
+@pytest.mark.parametrize("partial", [{"htmin": "15"}, {"hz": "2.5"}, {"hcs": "Plasma", "hg": "0"}])
 def test_partial_heatmap_link_does_not_error_and_keeps_other_defaults(partial):
     at = app_with_params(partial)
     assert not at.exception
@@ -570,14 +563,13 @@ def test_heatmap_condensation_note_only_when_the_zero_line_is_drawn():
     def notes(params):
         return [c.value for c in new_app_with(params).tabs[2].caption if "possible condensation" in c.value]
     new_app_with = app_with_params
-    assert len(notes({"hk": "leaf", "off": "-2"})) == 1          # zero boundary crosses the chart
-    assert notes({"hk": "leaf", "off": "0"}) == []               # VPD = 0 only at the 100 % RH edge
-    assert notes({"hk": "air", "off": "-2"}) == []               # air heatmaps are unchanged
+    assert len(notes({"off": "-2"})) == 1                        # zero boundary crosses the chart
+    assert notes({"off": "0"}) == []                             # VPD = 0 only at the 100 % RH edge
+    assert len(notes({"hk": "air", "off": "-2"})) == 1           # an old hk=air link shows the canopy heatmap
 
 
 def test_heatmap_leaf_assumption_caption_absent_without_leaf_use():
-    assert leaf_note(app_with_params({"hk": "air", "hg": "0", "off": "-2"})) == []  # target hidden
-    assert leaf_note(app_with_params({"hk": "air", "dlo": "1.5", "dhi": "0.5"})) == []  # invalid range
+    assert len(leaf_note(app_with_params({"hk": "air", "hg": "0", "off": "-2"}))) == 1   # always canopy: the offset assumption is stated
 
 
 # ---- heatmap figure downloads (PNG, PDF, SVG) and their cache -----------------------------------------
@@ -603,21 +595,23 @@ def test_heatmap_svg_download_is_offered_with_png_and_pdf_and_follows_the_settin
     calls = capture_heatmap_downloads(monkeypatch)
     at = new_app().run()
     assert heatmap_downloads(at) == set()                                   # nothing before preparing
-    at.radio(key="hm_kind").set_value(share.AIR_LABEL).run()
-    at.checkbox(key="hm_target").set_value(False).run()                     # the (canopy) target overlay is not drawn
     at.button(key="png_prepare").click().run()
     assert not at.exception and heatmap_downloads(at) == {"Download PNG", "Download PDF", "Download SVG"}
     assert (calls["Download SVG"]["file_name"], calls["Download SVG"]["mime"]) == ("vpd_heatmap.svg", "image/svg+xml")
     svg = calls["Download SVG"]["data"]
     assert svg[:5] == b"<?xml" and b"<svg" in svg and b"<image" in svg      # raster colour layer
-    assert b"Air VPD" in svg and b"Canopy VPD" not in svg
+    assert b"Canopy VPD" in svg and b"Air VPD" not in svg                   # canopy-only exports
     assert calls["Download PNG"]["data"][:8] == b"\x89PNG\r\n\x1a\n" and calls["Download PDF"]["data"][:5] == b"%PDF-"
     at.run()                                                                # unchanged settings keep the downloads
     assert heatmap_downloads(at) == {"Download PNG", "Download PDF", "Download SVG"}
-    at.radio(key="hm_kind").set_value(share.LEAF_LABEL).run()               # changed settings hide the old ones
-    assert heatmap_downloads(at) == set()
-    at.button(key="png_prepare").click().run()
-    assert b"Canopy VPD" in calls["Download SVG"]["data"] and heatmap_downloads(at)
+    for change in (lambda: at.selectbox(key="hm_cs").set_value("Turbo"),               # palette
+                   lambda: set_num(at, "dn_hi_day", 1.4),                                # range that positions the palette
+                   lambda: at.checkbox(key="hm_target").set_value(False)):              # boundaries
+        change()
+        at.run()
+        assert heatmap_downloads(at) == set()                                           # stale files are not offered
+        at.button(key="png_prepare").click().run()
+        assert heatmap_downloads(at) == {"Download PNG", "Download PDF", "Download SVG"}
 
 
 def test_older_cached_heatmap_export_without_svg_is_ignored_without_error():
@@ -798,11 +792,15 @@ def test_reverse_panel_data_and_shared_control_implementation():
     assert [p["controlsOnly"] for p in controls_and_panels(at) if p.get("controlsOnly")] == [True, True]
 
 
-def test_footer_is_shared_below_the_tabs():
+def test_footer_is_shared_below_the_tabs_with_the_copyable_citation():
     at = new_app().run()
-    assert "© 2026 Maarten Arthur Smits · Code: [MIT licence](https://github.com/MaartenArthurSmits/vpd_or_not_vpd/blob/main/LICENSE)" \
-           " · [Cite this calculator](https://github.com/MaartenArthurSmits/vpd_or_not_vpd/blob/main/CITATION.cff)" \
-        in [c.value for c in at.main.caption] or any("Cite this calculator" in c.value for c in at.caption)
+    caps = [c.value for c in at.caption]
+    assert "© 2026 Maarten Arthur Smits · Code: [MIT licence](https://github.com/MaartenArthurSmits/vpd_or_not_vpd/blob/main/LICENSE)" in caps
+    assert not any("Cite this calculator" in c for c in caps)
+    assert "Recommended citation (APA 7): Smits, M. A. (2026). *VPD Calculator* (Version 1.0.0) [Computer software]. " \
+           "https://vpd-or-not-vpd.streamlit.app/" in caps
+    plain = "Smits, M. A. (2026). VPD Calculator (Version 1.0.0) [Computer software]. https://vpd-or-not-vpd.streamlit.app/"
+    assert plain in [c.value for c in at.code]
     refs = " ".join(m.value for m in at.markdown)
     assert "Butler, D. R. (1977)" in refs and "Nelson, J. A., & Bugbee, B. (2015)" in refs
     assert "(illustrative growth-stage ranges" not in refs

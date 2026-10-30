@@ -13,55 +13,52 @@ import numpy as np
 import rangecolor
 import vpd
 
-# app colour scale -> ggplot2 fill scale
-_R_SCALES = {
-    "RdYlBu_r": 'scale_fill_distiller(palette = "RdYlBu", direction = -1, limits = zlim, oob = scales::squish)',
-    "Viridis": 'scale_fill_viridis_c(option = "D", limits = zlim, oob = scales::squish)',
-    "Turbo": 'scale_fill_viridis_c(option = "H", limits = zlim, oob = scales::squish)',
-    "Cividis": 'scale_fill_viridis_c(option = "E", limits = zlim, oob = scales::squish)',
-    "Plasma": 'scale_fill_viridis_c(option = "C", limits = zlim, oob = scales::squish)',
-    "YlGnBu": 'scale_fill_distiller(palette = "YlGnBu", direction = 1, limits = zlim, oob = scales::squish)',
-    "Spectral_r": 'scale_fill_distiller(palette = "Spectral", direction = -1, limits = zlim, oob = scales::squish)',
-    "Greys": 'scale_fill_distiller(palette = "Greys", direction = 1, limits = zlim, oob = scales::squish)',
-}
-
-
 def _num(x) -> str:
     return repr(float(x))
 
 
 def _heatmap_block(h: dict) -> list:
-    kind = h.get("kind", vpd.AIR)
+    kind = h.get("kind", vpd.LEAF)
     offset = float(h.get("offset", 0.0))
     step = float(h.get("contour_step", 0.5))
     temps = np.arange(h["t_min"], h["t_max"] + 1e-9, 0.25)
     rhs = np.arange(h["rh_min"], h["rh_max"] + 1e-9, 0.5)
     z = vpd.vpd_matrix(temps, rhs, kind, offset)
-    zlo = float(np.floor(z.min() * 2) / 2) if z.min() < 0 else 0.0
-    zhi = float(h["z_max"]) if h.get("z_max") else float(z.max())
+    tkind = h.get("target_kind") or kind          # colours follow `kind`, the target follows `target_kind`
+    anchor = h.get("anchor") if kind == vpd.LEAF else None
+    m = rangecolor.mapping(float(z.min()), float(z.max()), *(anchor if anchor else (None, None)), z_max=h.get("z_max"))
+    zlo, zhi = m["cmin"], m["cmax"]
+    zend = float(h["z_max"]) if h.get("z_max") else float(z.max())
+    dec = 2 if m["anchored"] else 1
+    palette = h.get("colorscale", rangecolor.DEFAULT_PALETTE)
+    pal_stops = rangecolor.stops(palette, m)
     start = float(np.ceil(z.min() / step) * step)
     if start - z.min() < 1e-9:      # a contour on the data minimum is only an edge artefact
         start += step
     label = "Air VPD" if kind == vpd.AIR else "Canopy VPD"
-    tkind = h.get("target_kind") or kind          # colours follow `kind`, the target follows `target_kind`
     tlabel = "Air VPD" if tkind == vpd.AIR else "Canopy VPD"
     subtitle_target = ""
     if h.get("target") is not None:
         lo_t, hi_t = h["target"]
         subtitle_target = (("Dashed contour" if vpd.is_point_target(lo_t, hi_t) else "Dashed contours")
-                           + ": t" + vpd.target_label(tkind, lo_t, hi_t, 2 if h.get("range_colour") else 1)[1:])      # "target Air VPD ..."
-    scale = _R_SCALES.get(h.get("colorscale", "RdYlBu_r"), _R_SCALES["RdYlBu_r"])
-    rc = bool(h.get("range_colour") and kind == vpd.LEAF and h.get("target") is not None and tkind == vpd.LEAF)
-    if rc:      # same fixed-kPa colour stops as the app; the colour bar shows actual canopy VPD
-        lo_c, hi_c = h["target"]
-        zlo, zhi = rangecolor.domain(lo_c, hi_c)
-        scale = ("scale_fill_gradientn(colours = roma_r,      # 256-colour roma table reversed, evenly spaced\n"
-                 "                       limits = zlim, oob = scales::squish, labels = function(x) sprintf(\"%.2f\", x))")
-        roma_r_def = ("# Scientific colour map 'roma' (Crameri, https://doi.org/10.5281/zenodo.8035877; MIT licence), "
-                      "reversed (roma_r)\n"
-                      "roma_r <- c(" + ", ".join(f'"{c}"' for c in rangecolor.HEX) + ")")
-
-    explain = ("\\n" + rangecolor.EXPLANATION) if rc else ""      # a second caption line in R
+                           + ": t" + vpd.target_label(tkind, lo_t, hi_t, dec)[1:])      # "target Canopy VPD ..."
+    # Same colour stops as the app: the palette is positioned by the acceptable range (see rangecolor).
+    tick_breaks = ", ".join(_num(v) for v, _ in rangecolor.ticks(m)) if m["anchored"] else None
+    scale = ("scale_fill_gradientn(colours = pal, values = pal_pos, limits = zlim, oob = scales::squish,\n"
+             + (f"                       breaks = c({tick_breaks}),\n" if tick_breaks else "")
+             + "                       labels = function(x) sprintf(\"%." + str(dec) + "f\", x))")
+    pal_def = [f"# Colour palette '{palette}' (256 colours) and the position of each colour along the colour bar",
+               "pal <- c(" + ", ".join(f'"{c}"' for _, c in pal_stops) + ")",
+               "pal_pos <- c(" + ", ".join(repr(p) for p, _ in pal_stops) + ")"]
+    if palette == rangecolor.DEFAULT_PALETTE:
+        pal_def.insert(0, "# 'Blue-green-red' adapts ColorBrewer colours (Apache-2.0; Cynthia Brewer, Mark Harrower and The "
+                          "Pennsylvania State University); not a standard or perceptually uniform palette.")
+    explain = ("\\n" + rangecolor.EXPLANATION) if m["anchored"] else ""      # a second caption line in R
+    zero_drawn = kind == vpd.LEAF and vpd.zero_boundary_in_range(z)
+    if zero_drawn:      # no ordinary zero contour over the saturation boundary
+        breaks_def = f"contour_breaks <- setdiff(round(seq({_num(start)}, {_num(zend)}, by = {_num(step)}), 10), 0)"
+    else:
+        breaks_def = f"contour_breaks <- seq({_num(start)}, {_num(zend)}, by = {_num(step)})"
     L = [
         "",
         "# =====================================================================",
@@ -76,7 +73,7 @@ def _heatmap_block(h: dict) -> list:
         f"hm_kind   <- \"{'air' if kind == vpd.AIR else 'leaf'}\"    # VPD type: \"air\" or \"leaf\"",
         f"hm_offset <- {_num(offset)}    # leaf temperature offset (degC), used when hm_kind == \"leaf\"",
         f"zlim      <- c({_num(zlo)}, {_num(zhi)})    # colour scale limits (kPa)",
-        f"contour_breaks <- seq({_num(start)}, {_num(zhi)}, by = {_num(step)})",
+        breaks_def,
         "",
         "grid <- expand.grid(temperature = seq(hm_t_min, hm_t_max, by = 0.25),",
         "                    rh = seq(hm_rh_min, hm_rh_max, by = 0.5))",
@@ -89,8 +86,7 @@ def _heatmap_block(h: dict) -> list:
               "grid$vpd_target <- es(t_ref_target) - es(grid$temperature) * grid$rh / 100"]
     point_in_view = h.get("point") is not None and h["t_min"] <= h["point"][0] <= h["t_max"] \
         and h["rh_min"] <= h["point"][1] <= h["rh_max"]
-    if rc:
-        L += ["", roma_r_def]
+    L += ["", *pal_def]
     L += [
         "",
         "p <- ggplot(grid, aes(x = temperature, y = rh)) +",
@@ -98,9 +94,8 @@ def _heatmap_block(h: dict) -> list:
         f"  {scale} +",
         "  geom_contour(aes(z = vpd), breaks = contour_breaks, colour = \"black\", alpha = 0.55, linewidth = 0.3) +",
     ]
-    zero_drawn = kind == vpd.LEAF and vpd.zero_boundary_in_range(z)
-    if zero_drawn:      # leaf saturation boundary, drawn only where it crosses the displayed grid
-        L += [f"  geom_contour(aes(z = vpd, colour = \"{vpd.ZERO_LABEL}\"), breaks = 0, linewidth = 1.4) +",
+    if zero_drawn:      # canopy saturation boundary: thin neutral dotted line, only where it crosses the grid
+        L += [f"  geom_contour(aes(z = vpd, colour = \"{vpd.ZERO_LABEL}\"), breaks = 0, linewidth = 0.5, linetype = \"dotted\") +",
               f"  scale_colour_manual(values = c(\"{vpd.ZERO_LABEL}\" = \"{vpd.ZERO_COLOUR}\"), name = NULL) +"]
     if h.get("target") is not None:
         lo, hi = h["target"]
@@ -117,7 +112,7 @@ def _heatmap_block(h: dict) -> list:
         f"       title = \"{label} as a function of temperature and relative humidity\",",
         *([f"       subtitle = \"{subtitle_target}\","] if h.get("target") is not None else []),
         f"       caption = \"Saturation vapour pressure: FAO-56 (Allen et al., 1998), Eq. 11"
-        f"{'. Negative leaf VPD indicates possible condensation.' if zero_drawn else ''}"
+        f"{'. Negative canopy VPD indicates possible condensation.' if zero_drawn else ''}"
         f"{explain}\") +",
         "  theme_minimal(base_size = 12)",
         "",

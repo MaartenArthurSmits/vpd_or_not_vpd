@@ -103,7 +103,7 @@ def test_r_script_heatmap_block_reproduces_settings():
     s = rscript.build_r_script(True, 22.0, 60.0, 1.0, vpd.AIR, 22.0, (0.8, 1.2), vpd.AIR, heatmap=HEATMAP)
     for expected in ("library(ggplot2)", "hm_t_min  <- 10.0", "hm_t_max  <- 40.0", "hm_rh_min <- 10.0",
                      "hm_rh_max <- 100.0", 'hm_kind   <- "leaf"', "hm_offset <- -2.0",
-                     'scale_fill_viridis_c(option = "D"', "breaks = unique(c(0.8, 1.2))",
+                     'scale_fill_gradientn(colours = pal, values = pal_pos', "breaks = unique(c(0.8, 1.2))",
                      'annotate("point", x = 22.0, y = 60.0', 'ggsave("vpd_heatmap.png"', "dpi = 300",
                      'ggsave("vpd_heatmap.pdf"'):
         assert expected in s, expected
@@ -209,7 +209,7 @@ def test_r_script_zero_boundary_only_when_it_crosses_the_leaf_grid():
         h = HEATMAP | {"kind": kind, "offset": offset, "target": None}
         return rscript.build_r_script(True, 22.0, 60.0, 1.0, vpd.AIR, 22.0 + offset, None, vpd.AIR, heatmap=h)
     crossing = script(vpd.LEAF, -2.0)
-    assert 'aes(z = vpd, colour = "Leaf saturation: VPD = 0 kPa"), breaks = 0' in crossing
+    assert 'aes(z = vpd, colour = "Saturation boundary: canopy VPD = 0 kPa"), breaks = 0' in crossing
     assert "scale_colour_manual" in crossing and "possible condensation" in crossing
     for s in (script(vpd.LEAF, 0.0), script(vpd.LEAF, 2.0), script(vpd.AIR, -2.0)):
-        assert "Leaf saturation" not in s and "possible condensation" not in s
+        assert "Saturation boundary" not in s and "possible condensation" not in s

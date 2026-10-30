@@ -11,6 +11,7 @@ from typing import Mapping
 from urllib.parse import urlencode
 
 import presets
+import rangecolor
 
 APP_URL = "https://vpd-or-not-vpd.streamlit.app/"
 
@@ -48,10 +49,10 @@ _PERIOD_NUMERIC = {  # query suffix -> (session-state key pattern, min, max)
 }
 # Heatmap choices. The colour-scale names must match plots.COLORSCALES (checked by a test); the contour
 # spacing options match the "Contour spacing (kPa)" control. The heatmap has no separate grid-resolution control.
-_COLORSCALES = ["RdYlBu_r", "Viridis", "Turbo", "Cividis", "Plasma", "YlGnBu", "Spectral_r", "Greys"]
+_COLORSCALES = list(rangecolor.PALETTES)
 _CONTOUR_STEPS = [0.1, 0.2, 0.5, 1.0]
 HEATMAP_DEFAULTS = {"hm_tmin": 10.0, "hm_tmax": 40.0, "hm_rhmin": 10.0, "hm_rhmax": 100.0, "hm_zmax": 0.0,
-                    "hm_cs": "RdYlBu_r", "hm_step": 0.5, "hm_target": True, "hm_point": True}   # = widget defaults
+                    "hm_cs": rangecolor.DEFAULT_PALETTE, "hm_step": 0.5, "hm_target": True, "hm_point": True}   # = widget defaults
 _HEATMAP_NUMERIC = ("htmin", "htmax", "hrmin", "hrmax", "hz")
 _BOOL_KEYS = {"hg": "hm_target", "hp": "hm_point"}      # highlight target range / mark selected point
 
@@ -72,8 +73,7 @@ def parse_params(params: Mapping[str, str]) -> dict:
     # "k" (reverse target basis) from older links is ignored: the reverse target is always canopy VPD.
     if params.get("ik") in _KIND:
         out["interval_kind"] = _KIND[params["ik"]]
-    if params.get("hk") in _KIND:
-        out["hm_kind"] = _KIND[params["hk"]]
+    # "hk" (heatmap VPD type) from older links is ignored: the heatmap is always canopy VPD.
     if params.get("hcs") in _COLORSCALES:
         out["hm_cs"] = params["hcs"]
     if "hst" in params:
@@ -139,7 +139,6 @@ def build_params(state: Mapping) -> dict:
     for q in _HEATMAP_NUMERIC:
         key = _NUMERIC[q][0]
         p[q] = _fmt(state.get(key, HEATMAP_DEFAULTS[key]))
-    p["hk"] = "air" if state.get("hm_kind", LEAF_LABEL) == AIR_LABEL else "leaf"
     p["hcs"] = state.get("hm_cs", HEATMAP_DEFAULTS["hm_cs"])
     p["hst"] = _fmt(state.get("hm_step", HEATMAP_DEFAULTS["hm_step"]))
     for q, key in _BOOL_KEYS.items():

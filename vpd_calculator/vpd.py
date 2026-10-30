@@ -206,8 +206,8 @@ def zero_boundary_in_range(z) -> bool:
     return bool(np.nanmin(z) < -1e-12 and np.nanmax(z) > 1e-12)
 
 
-ZERO_LABEL = "Leaf saturation: VPD = 0 kPa"
-ZERO_COLOUR = "#c2185b"          # distinct from the black ordinary/target contours
+ZERO_LABEL = "Saturation boundary: canopy VPD = 0 kPa"
+ZERO_COLOUR = "#303030"          # neutral, thin and dotted; distinct from the solid ordinary and dashed target contours
 
 
 def is_point_target(low: float, high: float) -> bool:

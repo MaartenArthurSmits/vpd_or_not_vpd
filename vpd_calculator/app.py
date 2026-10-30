@@ -86,11 +86,6 @@ if _cur in presets.RANGE_PRESETS and presets.resolve_preset(_cur, _day, _night) 
     st.session_state["range_preset"] = presets.CUSTOM
 
 
-st.session_state.setdefault("hm_kind", share.LEAF_LABEL)       # canopy heatmap by default; a restored Air VPD is kept
-for _k, _v in st.session_state.get("_hm_keep", {}).items():      # palette controls are hidden in range colouring
-    st.session_state.setdefault(_k, _v)
-
-
 FIG4_PATH = Path(__file__).parent / "assets" / "nelson_bugbee_2015_fig4.png"
 FIG4_URL = "https://doi.org/10.1371/journal.pone.0138930.g004"
 LEAF_GUIDANCE = f"""
@@ -374,56 +369,53 @@ with tab_heat:
                              format="%.1f", key="hm_rhmin")
     rh_max = h4.number_input("Max RH (%)", value=100.0, min_value=1.0, max_value=100.0, step=5.0,
                              format="%.1f", key="hm_rhmax")
-    g1, g2, g3, g4 = st.columns(4)
-    hm_kind_label = g1.radio("VPD type", [share.AIR_LABEL, share.LEAF_LABEL], key="hm_kind", horizontal=True)
-    # Range-based colouring: canopy VPD, "Highlight acceptable range" on and a valid range. It replaces the
-    # generic palette, so the palette and colour-maximum controls are hidden (their values are kept for later).
-    range_mode = (hm_kind_label == share.LEAF_LABEL and st.session_state.get("hm_target", True) and interval_ok)
-    _keep = st.session_state.setdefault("_hm_keep", {})
-    if range_mode:
-        cscale = _keep.get("hm_cs", st.session_state.get("hm_cs", "RdYlBu_r"))
-        zmax_in = _keep.get("hm_zmax", st.session_state.get("hm_zmax", 0.0))
-        st.session_state["hm_cs"], st.session_state["hm_zmax"] = cscale, zmax_in
-    else:
-        cscale = g2.selectbox("Colour scale", plots.COLORSCALES, key="hm_cs")
-        zmax_in = g4.number_input("Colour scale max (kPa, 0 = auto)", min_value=0.0, value=0.0, step=0.5,
-                                  format="%.1f", key="hm_zmax")
-        _keep["hm_cs"], _keep["hm_zmax"] = cscale, zmax_in
-    cstep = g3.selectbox("Contour spacing (kPa)", [0.1, 0.2, 0.5, 1.0], index=2, key="hm_step")
+    g1, g2, g3 = st.columns(3)
+    cscale = g1.selectbox("Colour scale", plots.COLORSCALES, key="hm_cs")
+    cstep = g2.selectbox("Contour spacing (kPa)", [0.1, 0.2, 0.5, 1.0], index=2, key="hm_step")
+    zmax_in = g3.number_input("Colour scale max (kPa, 0 = auto)", min_value=0.0, value=0.0, step=0.5,
+                              format="%.1f", key="hm_zmax")
     o1, o2 = st.columns(2)
-    show_target = o1.checkbox("Highlight acceptable range (Day or Night, as chosen in the Calculator)", value=True, key="hm_target")
+    show_target = o1.checkbox("Show acceptable-range boundaries", value=True, key="hm_target")
     show_point = o2.checkbox("Mark selected temperature/RH", value=True, key="hm_point")
-    hm_kind = kind_from_label(hm_kind_label)
+    hm_kind = vpd.LEAF                                   # the heatmap is always canopy VPD
+
+    # The selected Day/Night range positions the palette whether or not its boundary lines are shown.
+    anchor = (lo, hi) if interval_ok else None
+    if anchor is not None and zmax_in and zmax_in <= hi + 1e-9:
+        st.error(f"Colour scale max ({zmax_in:.2f} kPa) must be above the upper acceptable limit ({hi:.2f} kPa); "
+                 "using the automatic maximum instead.")
+        zmax_in = 0.0
 
     if t_min >= t_max or rh_min >= rh_max:
         st.error("Minimum values must be smaller than maximum values.")
     else:
         pt = (t_air, current_rh) if (show_point and current_rh is not None) else None
         tg = (lo, hi) if (show_target and interval_ok) else None
-        if hm_kind == vpd.LEAF or (tg is not None and ikind == vpd.LEAF):      # leaf VPD is used by the chart
-            sign = "−" if offset < 0 else "+"
-            note = (f"Canopy VPD here assumes one constant leaf–air offset of {offset:+.1f} °C: leaf temperature = "
-                    f"air temperature {sign} {abs(offset):.1f} °C throughout this chart.")
-            if measured is not None:
-                note += (f" The offset is derived from the measured leaf temperature ({measured:.1f} °C) and the "
-                         f"Calculator's air temperature ({t_air:.1f} °C).")
-            st.caption(note)
+        sign = "−" if offset < 0 else "+"
+        note = (f"Canopy VPD here assumes one constant leaf–air offset of {offset:+.1f} °C: leaf temperature = "
+                f"air temperature {sign} {abs(offset):.1f} °C throughout this chart.")
+        if measured is not None:
+            note += (f" The offset is derived from the measured leaf temperature ({measured:.1f} °C) and the "
+                     f"Calculator's air temperature ({t_air:.1f} °C).")
+        st.caption(note)
         fig = plots.heatmap_figure(t_min, t_max, rh_min, rh_max, hm_kind, offset, cscale, cstep,
-                                   zmax_in or None, pt, tg, target_kind=ikind, range_colour=range_mode)
+                                   zmax_in or None, pt, tg, target_kind=ikind, anchor=anchor)
         st.plotly_chart(fig, width="stretch", config={"toImageButtonOptions": {"format": "png", "scale": 2}})
         if any(trace.name == vpd.ZERO_LABEL for trace in fig.data):
-            st.caption("Negative canopy VPD (beyond the saturation line) indicates possible condensation.")
-        if range_mode:
+            st.caption("Negative canopy VPD (beyond the saturation boundary) indicates possible condensation.")
+        if anchor is not None:
             st.caption(rangecolor.EXPLANATION)
+        else:
+            st.caption("The acceptable range is invalid, so the palette is spread evenly over the plotted values.")
+        if cscale == rangecolor.DEFAULT_PALETTE:
+            st.caption(rangecolor.PALETTE_NOTE)
         if tg:
             if vpd.is_point_target(lo, hi):
-                st.caption(f"Dashed contour: user-defined single-value **canopy VPD** target "
-                           f"{lo:.1f} kPa (the {period} target from the Acceptable range tab; "
-                           f"colours show {hm_kind} VPD).")
+                st.caption(f"Dashed contour: single-value **canopy VPD** target {lo:.2f} kPa "
+                           f"(the {period} target from the Acceptable range tab).")
             else:
-                st.caption(f"Dashed contours{'' if range_mode else ' and light overlay'}: user-defined **canopy VPD** target range "
-                           f"{lo:.1f}-{hi:.1f} kPa (the {period} target from the Acceptable range tab; "
-                           f"colours show {hm_kind} VPD).")
+                st.caption(f"Dashed contours: **canopy VPD** target range {lo:.2f}–{hi:.2f} kPa "
+                           f"(the {period} target from the Acceptable range tab).")
 
         d1, d2, d3 = st.columns(3)
         grid = vpd.vpd_grid(t_min, t_max, rh_min, rh_max, 0.5, 1.0, offset=offset)
@@ -431,7 +423,7 @@ with tab_heat:
 
         hm_params = dict(t_min=t_min, t_max=t_max, rh_min=rh_min, rh_max=rh_max, kind=hm_kind,
                          offset=offset, colorscale=cscale, contour_step=cstep, z_max=zmax_in or None,
-                         point=pt, target=tg, target_kind=ikind, range_colour=range_mode)
+                         point=pt, target=tg, target_kind=ikind, anchor=anchor)
         leaf_t = measured if measured is not None else t_air + offset
         r_code = rscript.build_r_script(
             mode_a, t_air, st.session_state["rh"], st.session_state["target_vpd"],
@@ -442,11 +434,11 @@ with tab_heat:
                            help="Reproduces the calculation and this heatmap with ggplot2 (PNG and PDF export).")
 
         sig = (t_min, t_max, rh_min, rh_max, hm_kind, round(offset, 6), cscale, cstep, zmax_in, pt, tg, ikind,
-               range_mode, rangecolor.PALETTE_ID if range_mode else None)
+               anchor, rangecolor.PALETTE_ID)
         if d2.button("Prepare figure downloads", key="png_prepare"):
             export = mpl_export.heatmap_mpl(t_min, t_max, rh_min, rh_max, hm_kind, offset, cscale, cstep,
                                             zmax_in or None, pt, tg, target_kind=ikind,
-                                            range_colour=range_mode)
+                                            anchor=anchor)
             st.session_state["png"] = (sig, mpl_export.to_bytes(export, "png", 300),
                                        mpl_export.to_bytes(export, "pdf"), mpl_export.to_bytes(export, "svg"))
         cached = st.session_state.get("png")
@@ -492,6 +484,9 @@ with tab_methods:
 **Attribution.** Pulse Grow (Koverda, 2020) inspired the interface. It is not the source of the equations; those
 come from FAO-56 (Allen et al., 1998).
 
+This product includes color specifications and designs developed by Cynthia Brewer (http://colorbrewer.org/). The
+default heatmap palette "Blue–green–red" is this calculator's own adaptation of ColorBrewer colours.
+
 **References** (APA 7)
 """
     )
@@ -501,7 +496,6 @@ come from FAO-56 (Allen et al., 1998).
 - ASHRAE. (2023). Environmental control for animals and plants. In *ASHRAE handbook* (SI ed., Chapter 25). https://handbook.ashrae.org/Handbooks/A23/SI/A23_Ch25/a23_ch25_si.aspx
 - Bayer. (2020, February 12). *Fruit length in winter-grown cucumbers*. https://www.vegetables.bayer.com/ca/en-ca/resources/growing-tips/cultivation-insights/fruit-length-in-winter-grown-cucumbers.html
 - Butler, D. R. (1977). Coffee leaf temperatures in a tropical environment. *Acta Botanica Neerlandica, 26*(2), 129–140. https://natuurtijdschriften.nl/pub/540166
-- Crameri, F. (2023). *Scientific colour maps* (Version 8.0.0) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.8035877
 - Garen, J. C., Crous, K. Y., Barton, C. V. M., Rymer, P. D., & Tjoelker, M. G. (2026). Joint dependence of leaf minimum conductance on vapor pressure deficit and temperature. *Plant Physiology, 201*(4), Article kiag575. https://doi.org/10.1093/plphys/kiag575
 - Grossiord, C., Buckley, T. N., Cernusak, L. A., Novick, K. A., Poulter, B., Siegwolf, R. T. W., Sperry, J. S., & McDowell, N. G. (2020). Plant responses to rising vapor pressure deficit. *New Phytologist, 226*(6), 1550–1566. https://doi.org/10.1111/nph.16485
 - Johnston, M. R., Barnes, M. L., Preisler, Y., Smith, W. K., Biederman, J. A., Scott, R. L., Williams, A. P., & Dannenberg, M. P. (2025). Effects of hot versus dry vapor pressure deficit on ecosystem carbon and water fluxes. *Journal of Geophysical Research: Biogeosciences, 130*(1), Article e2024JG008146. https://doi.org/10.1029/2024JG008146
@@ -645,3 +639,5 @@ None of these are experimental measurements.
 
 st.divider()
 st.caption(citation.footer_markdown())
+st.caption("Recommended citation (APA 7): " + citation.apa_footer_markdown())
+st.code(citation.apa_footer_plain(), language=None, wrap_lines=True)

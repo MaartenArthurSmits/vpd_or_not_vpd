@@ -35,7 +35,16 @@ def ieee() -> str:
             f"Available: {REPO_URL}")
 
 
+def apa_footer_plain() -> str:
+    """Recommended APA 7 citation shown in the footer (plain text, for copying)."""
+    return (f"{AUTHOR_FAMILY}, M. A. ({YEAR}). {TITLE} (Version {VERSION}) [Computer software]. {APP_URL}")
+
+
+def apa_footer_markdown() -> str:
+    """The same citation with the software title in italics."""
+    return apa_footer_plain().replace(TITLE, f"*{TITLE}*", 1)
+
+
 def footer_markdown() -> str:
-    """Shared footer: copyright, code licence and citation file (the licence applies to the code only)."""
-    return (f"© {YEAR} {AUTHOR_GIVEN} {AUTHOR_FAMILY} · Code: [MIT licence]({REPO_URL}/blob/main/LICENSE) · "
-            f"[Cite this calculator]({REPO_URL}/blob/main/CITATION.cff)")
+    """Shared footer note: copyright and code licence (the licence applies to the code only)."""
+    return f"© {YEAR} {AUTHOR_GIVEN} {AUTHOR_FAMILY} · Code: [MIT licence]({REPO_URL}/blob/main/LICENSE)"

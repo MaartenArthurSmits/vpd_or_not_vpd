@@ -138,15 +138,14 @@ def test_heatmap_controls(page):
     open_tab(page, "VPD Heatmap")
     chart = page.locator('[data-testid="stPlotlyChart"]:visible').first
     chart.wait_for(timeout=TIMEOUT)
-    page.get_by_text("Canopy VPD (kPa) as a function of temperature").first.wait_for(timeout=TIMEOUT)   # canopy by default
-    assert page.get_by_text("Colours show canopy VPD relative to the acceptable range").count() >= 1
-    page.get_by_text("Air VPD", exact=True).locator("visible=true").first.click()
-    page.get_by_text("Air VPD (kPa) as a function of temperature").first.wait_for(timeout=TIMEOUT)
+    page.get_by_text("Canopy VPD (kPa) as a function of temperature").first.wait_for(timeout=TIMEOUT)   # canopy only
+    assert page.get_by_text("VPD type").count() == 0
+    assert page.get_by_text("Colours are positioned by the acceptable range").count() >= 1
     page.get_by_role("combobox", name="Colour scale").click()
     page.get_by_role("option", name="Viridis").click()
     chart.wait_for()
     set_number(page, "Min temperature (°C)", 12)
-    page.get_by_text("Air VPD (kPa) as a function of temperature").first.wait_for()
+    page.get_by_text("Canopy VPD (kPa) as a function of temperature").first.wait_for()
 
 
 @pytest.mark.exports
@@ -180,13 +179,12 @@ def test_download_r_script_with_ggplot2_heatmap_and_reproduce(page, artifacts_di
     set_number(page, "Air temperature (°C)", 22.34)                         # precise decimal input
     result(page).get_by_text(f"{vpd.vpd_leaf(22.34, 60, 21.34):.2f} kPa").wait_for(timeout=TIMEOUT)
     open_tab(page, "VPD Heatmap")
-    page.get_by_text("Canopy VPD", exact=True).locator("visible=true").first.click()
     page.get_by_text("Canopy VPD (kPa) as a function of temperature").first.wait_for(timeout=TIMEOUT)
     path = download(page, "Download reproducible R script", artifacts_dir, "vpd_heatmap.R")
     text = path.read_text(encoding="utf-8")
     assert "es <- function(t) 0.6108 * exp(17.27 * t / (t + 237.3))" in text
     assert "t_air  <- 22.34" in text
-    for expected in ("library(ggplot2)", "hm_t_min  <- 10.0", 'hm_kind   <- "leaf"', "breaks = unique(c(0.7, 1.3))",
+    for expected in ("library(ggplot2)", "hm_t_min  <- 10.0", 'hm_kind   <- "leaf"', "breaks = unique(c(0.7, 1.3))", "scale_fill_gradientn(colours = pal",
                      'annotate("point", x = 22.34', 'ggsave("vpd_heatmap.png"', "dpi = 300", 'ggsave("vpd_heatmap.pdf"'):
         assert expected in text, expected
     expected_vpd = vpd.vpd_air(22.34, 60)

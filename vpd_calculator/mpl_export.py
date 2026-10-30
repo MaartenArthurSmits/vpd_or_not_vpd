@@ -21,74 +21,62 @@ from matplotlib.lines import Line2D  # noqa: E402
 import rangecolor  # noqa: E402
 import vpd  # noqa: E402
 
-CMAPS = {  # app colour-scale names -> Matplotlib colormaps
-    "RdYlBu_r": "RdYlBu_r", "Viridis": "viridis", "Turbo": "turbo", "Cividis": "cividis",
-    "Plasma": "plasma", "YlGnBu": "YlGnBu", "Spectral_r": "Spectral_r", "Greys": "Greys",
-}
-
-
-def heatmap_mpl(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0, colorscale="RdYlBu_r",
+def heatmap_mpl(t_min, t_max, rh_min, rh_max, kind=vpd.LEAF, offset=0.0, colorscale=rangecolor.DEFAULT_PALETTE,
                 contour_step=0.5, z_max=None, point=None, target=None,
-                figsize=(10.0, 6.5), target_kind=None, range_colour=False) -> Figure:
-    """Temperature x RH heatmap with labelled contours, target range and selected point.
+                figsize=(10.0, 6.5), target_kind=None, anchor=None) -> Figure:
+    """Temperature x RH heatmap with labelled contours, acceptable-range boundaries and selected point.
 
-    Colours follow `kind`; the target shading/contours follow `target_kind` (default: `kind`).
-    `range_colour`: colour canopy VPD by distance from the canopy target range (see rangecolor).
+    `anchor`: (low, high) acceptable range that positions the palette (see rangecolor.mapping); `target`: the dashed
+    boundary lines (no colour band is drawn). Same colour stops as the interactive chart.
     """
     temps = np.arange(t_min, t_max + 1e-9, 0.25)
     rhs = np.arange(rh_min, rh_max + 1e-9, 0.5)
     z = vpd.vpd_matrix(temps, rhs, kind, offset)
     label = "Air VPD" if kind == vpd.AIR else "Canopy VPD"
-    vmin = float(np.floor(z.min() * 2) / 2) if z.min() < 0 else 0.0
-    vmax = float(z_max) if z_max else float(z.max())
     tkind = kind if target_kind is None else target_kind
     zt = z if tkind == kind else vpd.vpd_matrix(temps, rhs, tkind, offset)
+    anchored = anchor is not None and kind == vpd.LEAF
+    m = rangecolor.mapping(float(z.min()), float(z.max()), *(anchor if anchored else (None, None)), z_max=z_max)
+    dec = 2 if m["anchored"] else 1
+    vmax = float(z_max) if z_max else float(z.max())
 
-    rc = bool(range_colour and kind == vpd.LEAF and target is not None and tkind == vpd.LEAF)
-    dec = 2 if rc else 1
     fig = Figure(figsize=figsize, constrained_layout=True)
     ax = fig.subplots()
-    if rc:
-        lo_c, hi_c = target
-        cmin, cmax = rangecolor.domain(lo_c, hi_c)
-        cmap = LinearSegmentedColormap.from_list("roma_r", list(rangecolor.LUT), N=256)
-        mesh = ax.pcolormesh(temps, rhs, z, cmap=cmap, norm=Normalize(cmin, cmax, clip=True), shading="auto",
-                             rasterized=True)
-        cbar = fig.colorbar(mesh, ax=ax, pad=0.02)
-        cticks = [cmin, lo_c] + ([] if vpd.is_point_target(lo_c, hi_c) else [hi_c]) + [cmax]
-        cbar.set_ticks(cticks)
-        cbar.set_ticklabels([f"{v:.2f}" for v in cticks])
-    else:
-        mesh = ax.pcolormesh(temps, rhs, z, cmap=CMAPS.get(colorscale, "RdYlBu_r"), vmin=vmin, vmax=vmax,
-                             shading="auto", rasterized=True)
-        cbar = fig.colorbar(mesh, ax=ax, pad=0.02)
+    cmap = LinearSegmentedColormap.from_list("range_palette", rangecolor.stops(colorscale, m), N=1024)
+    mesh = ax.pcolormesh(temps, rhs, z, cmap=cmap, norm=Normalize(m["cmin"], m["cmax"], clip=True), shading="auto",
+                         rasterized=True)
+    cbar = fig.colorbar(mesh, ax=ax, pad=0.02)
+    if m["anchored"]:
+        tk = rangecolor.ticks(m)                      # numbers only here: long tick labels squeeze the figure
+        cbar.set_ticks([v for v, _ in tk])
+        cbar.set_ticklabels([f"{v:.2f}" for v, _ in tk])
     cbar.set_label(f"{label} (kPa)")
 
-    start = np.ceil(z.min() / contour_step) * contour_step
-    levels = np.arange(start, vmax + contour_step / 2, contour_step)
+    zero_drawn = kind == vpd.LEAF and vpd.zero_boundary_in_range(z)
+    levels = np.arange(np.ceil(z.min() / contour_step) * contour_step, vmax + contour_step / 2, contour_step)
     levels = levels[levels > z.min() + 1e-9]          # a contour on the data minimum is only an edge artefact
+    if zero_drawn:
+        levels = levels[np.abs(levels) > 1e-9]        # no ordinary zero contour over the saturation boundary
     if len(levels):
         cs = ax.contour(temps, rhs, z, levels=levels, colors="black", linewidths=0.6, alpha=0.6)
         ax.clabel(cs, fmt=f"%.{dec}f", fontsize=8)
 
     handles = []
-    zero_drawn = kind == vpd.LEAF and vpd.zero_boundary_in_range(z)
     if zero_drawn:
-        ax.contour(temps, rhs, z, levels=[0.0], colors=vpd.ZERO_COLOUR, linewidths=3.2, linestyles="-")
-        handles.append(Line2D([], [], color=vpd.ZERO_COLOUR, linewidth=3.2, label=vpd.ZERO_LABEL))
+        ax.contour(temps, rhs, z, levels=[0.0], colors=vpd.ZERO_COLOUR, linewidths=1.3, linestyles=":")
+        handles.append(Line2D([], [], color=vpd.ZERO_COLOUR, linewidth=1.3, linestyle=":", label=vpd.ZERO_LABEL))
     if target is not None:
         lo, hi = target
-        if hi > lo and not rc:
-            ax.contourf(temps, rhs, zt, levels=[lo, hi], colors=["white"], alpha=0.35)
         tl = sorted({float(lo), float(hi)})
         ct = ax.contour(temps, rhs, zt, levels=tl, colors="black", linewidths=2.0, linestyles="--")
         ax.clabel(ct, fmt=f"%.{dec}f", fontsize=9)
         handles.append(Line2D([], [], color="black", linestyle="--", linewidth=2.0,
                               label=vpd.target_label(tkind, lo, hi, dec)))
-    if rc:
-        handles += [Line2D([], [], marker="v", color=rangecolor.LOW_COLOUR, markeredgecolor="black", linestyle="none",
+    if m["anchored"]:
+        lut = rangecolor.palette_lut(colorscale)
+        handles += [Line2D([], [], marker="v", color=lut[0], markeredgecolor="black", linestyle="none",
                            label="Below range: VPD under the lower limit"),
-                    Line2D([], [], marker="^", color=rangecolor.HIGH_COLOUR, markeredgecolor="black", linestyle="none",
+                    Line2D([], [], marker="^", color=lut[-1], markeredgecolor="black", linestyle="none",
                            label="Above range: VPD over the upper limit")]
     point_in_view = point is not None and t_min <= point[0] <= t_max and rh_min <= point[1] <= rh_max
     if point_in_view:
@@ -99,7 +87,7 @@ def heatmap_mpl(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0, colorsca
     entries = ax.get_legend_handles_labels()[0] + handles
     if entries:
         ax.legend(handles=entries, loc="upper center", bbox_to_anchor=(0.5, -0.14),   # below the axis label
-                  ncol=min(len(entries), 3), frameon=True, fontsize=9)
+                  ncol=min(len(entries), 3 if len(entries) <= 4 else 2), frameon=True, fontsize=9)
 
     ax.set_xlim(t_min, t_max)
     ax.set_ylim(rh_min, rh_max)
@@ -109,12 +97,14 @@ def heatmap_mpl(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0, colorsca
     notes = []
     if kind == vpd.LEAF:
         sign = "−" if offset < 0 else "+"
-        notes.append(f"Leaf VPD assumes one constant leaf-air offset of {offset:+.1f} °C: "
+        notes.append(f"Canopy VPD assumes one constant leaf-air offset of {offset:+.1f} °C: "
                      f"leaf temperature = air temperature {sign} {abs(offset):.1f} °C throughout the chart.")
     if zero_drawn:
-        notes.append("Negative leaf VPD (beyond the saturation line) indicates possible condensation.")
-    if rc:
+        notes.append("Negative canopy VPD (beyond the saturation boundary) indicates possible condensation.")
+    if m["anchored"]:
         notes.append(rangecolor.EXPLANATION)
+    if colorscale == rangecolor.DEFAULT_PALETTE:
+        notes.append(rangecolor.PALETTE_NOTE)
     notes.append("Saturation vapour pressure: FAO-56 (Allen et al., 1998), Eq. 11.")
     # Captions are wrapped and placed in a figure-level label, so constrained layout reserves their space.
     fig.supxlabel("\n".join(textwrap.fill(n, width=125) for n in notes), x=0.01, ha="left", fontsize=8.5)

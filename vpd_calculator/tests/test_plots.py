@@ -19,7 +19,7 @@ def kinds(fig):
 
 
 def test_heatmap_base_traces_and_axes():
-    fig = plots.heatmap_figure(10, 40, 20, 100)
+    fig = plots.heatmap_figure(10, 40, 20, 100, vpd.AIR)
     assert kinds(fig) == ["Heatmap", "Contour"]
     assert list(fig.layout.xaxis.range) == [10, 40]
     assert list(fig.layout.yaxis.range) == [20, 100]
@@ -42,11 +42,9 @@ def test_heatmap_leaf_offset_changes_values():
 
 def test_heatmap_target_and_point_layers():
     fig = plots.heatmap_figure(10, 40, 20, 100, point=(22, 60), target=(0.8, 1.2))
-    assert kinds(fig) == ["Heatmap", "Heatmap", "Contour", "Contour", "Scatter"]
+    assert kinds(fig) == ["Heatmap", "Contour", "Contour", "Scatter"]          # no white overlay layer any more
     target = target_trace(fig).contours
     assert target.start == 0.8 and target.end == 1.2
-    mask = np.asarray(fig.data[1].z, dtype=float)
-    assert np.isnan(mask).any() and (mask[~np.isnan(mask)] == 1).all()
 
 
 def test_heatmap_point_outside_range_is_omitted():
@@ -131,23 +129,6 @@ def _cell(fig_trace, x=T_AIR, y=RH):
     return i, j
 
 
-@pytest.mark.parametrize("hm_kind", BOTH)
-@pytest.mark.parametrize("target_kind,inside", [(vpd.AIR, True), (vpd.LEAF, False)])
-def test_plotly_target_follows_target_kind_on_both_heatmaps(hm_kind, target_kind, inside):
-    fig = plots.heatmap_figure(10, 40, 20, 100, hm_kind, OFFSET, point=(T_AIR, RH), target=TARGET,
-                               target_kind=target_kind)
-    colours, mask, target_contour = fig.data[0], fig.data[1], target_trace(fig)
-    i, j = _cell(mask)
-    assert (not np.isnan(mask.z[i][j])) is inside
-    # colours still follow the heatmap's own VPD type
-    expected_colour = vpd.vpd_air(T_AIR, RH) if hm_kind == vpd.AIR else vpd.vpd_leaf(T_AIR, RH, T_AIR + OFFSET)
-    assert colours.z[i][j] == pytest.approx(expected_colour, abs=1e-9)
-    # dashed contours are drawn on the target-kind field
-    expected_target = vpd.vpd_air(T_AIR, RH) if target_kind == vpd.AIR else vpd.vpd_leaf(T_AIR, RH, T_AIR + OFFSET)
-    assert target_contour.z[i][j] == pytest.approx(expected_target, abs=1e-9)
-    assert "Air VPD" in target_contour.name if target_kind == vpd.AIR else "Canopy VPD" in target_contour.name
-
-
 @pytest.mark.parametrize("target_kind", BOTH)
 def test_plotly_target_region_is_identical_for_both_heatmap_views(target_kind):
     figs = [plots.heatmap_figure(10, 40, 20, 100, k, OFFSET, target=TARGET, target_kind=target_kind) for k in BOTH]
@@ -170,28 +151,6 @@ def _mpl_target_artists(fig):
               and c.get_linewidths()[0] == 2.0]
     assert len(filled) == 1 and len(dashed) == 1
     return filled[0], dashed[0]
-
-
-@pytest.mark.parametrize("hm_kind", BOTH)
-@pytest.mark.parametrize("target_kind,inside", [(vpd.AIR, True), (vpd.LEAF, False)])
-def test_mpl_target_follows_target_kind_on_both_heatmaps(hm_kind, target_kind, inside):
-    fig = mpl_export.heatmap_mpl(10, 40, 10, 100, hm_kind, OFFSET, point=(T_AIR, RH), target=TARGET,
-                                 target_kind=target_kind)
-    filled, _ = _mpl_target_artists(fig)
-    assert any(p.contains_point((T_AIR, RH)) for p in filled.get_paths()) is inside
-    legend_text = [t.get_text() for t in fig.axes[0].get_legend().get_texts()]
-    label = "Air VPD" if target_kind == vpd.AIR else "Canopy VPD"
-    assert any(f"Target {label} 0.8-1.2 kPa" in t for t in legend_text)
-
-
-@pytest.mark.parametrize("target_kind", BOTH)
-def test_mpl_target_geometry_is_identical_for_both_heatmap_views(target_kind):
-    arts = [_mpl_target_artists(mpl_export.heatmap_mpl(10, 40, 10, 100, k, OFFSET, target=TARGET,
-                                                       target_kind=target_kind)) for k in BOTH]
-    for a, b in zip(arts[0], arts[1]):
-        assert len(a.get_paths()) == len(b.get_paths())
-        for pa, pb in zip(a.get_paths(), b.get_paths()):
-            assert np.allclose(pa.vertices, pb.vertices)
 
 
 @pytest.mark.parametrize("target_kind", BOTH)
@@ -227,13 +186,6 @@ def test_plotly_single_target_has_one_contour_and_no_band(target_kind, label):
     assert all("(overlay)" not in (t.name or "") for t in fig.data)
 
 
-def test_plotly_range_target_still_has_overlay_and_range_label():
-    fig = plots.heatmap_figure(10, 40, 20, 100, vpd.AIR, OFFSET, target=TARGET, target_kind=vpd.AIR)
-    assert kinds(fig) == ["Heatmap", "Heatmap", "Contour", "Contour"]
-    assert fig.data[1].name == "Target Air VPD 0.8-1.2 kPa (overlay)"
-    assert target_trace(fig).name == "Target Air VPD 0.8-1.2 kPa"
-
-
 def test_plotly_single_target_contour_is_drawn_at_the_value():
     fig = plots.heatmap_figure(10, 40, 20, 100, vpd.LEAF, OFFSET, target=POINT, target_kind=vpd.AIR)
     z = np.asarray(target_trace(fig).z)
@@ -263,14 +215,14 @@ def test_vpd_vs_rh_single_target_is_a_line_not_a_band():
 
 
 # ---- leaf saturation (VPD = 0) boundary ----------------------------------------------------------------
-ZERO = "Leaf saturation: VPD = 0 kPa"
+ZERO = vpd.ZERO_LABEL
 
 
 def test_plotly_zero_boundary_only_on_leaf_heatmaps_where_it_crosses():
     crossing = plots.heatmap_figure(10, 40, 10, 100, vpd.LEAF, -2.0, target=TARGET, target_kind=vpd.AIR)
     zero = [t for t in crossing.data if t.name == ZERO]
     assert len(zero) == 1 and zero[0].showlegend and zero[0].contours.start == zero[0].contours.end == 0.0
-    assert zero[0].line.color != "black"                                  # distinct from target/ordinary contours
+    assert zero[0].line.color != "black" and zero[0].line.dash == "dot" and zero[0].line.width <= 2
     assert np.min(crossing.data[0].z) < 0                                 # negative values are preserved
     for fig in (plots.heatmap_figure(10, 40, 10, 100, vpd.LEAF, 0.0),     # touches only the 100 % RH edge
                 plots.heatmap_figure(10, 40, 10, 100, vpd.LEAF, 2.0),     # entirely positive
@@ -279,12 +231,12 @@ def test_plotly_zero_boundary_only_on_leaf_heatmaps_where_it_crosses():
 
 
 def _mpl_zero_artists(fig):
-    return [c for c in fig.axes[0].collections if len(c.get_linewidths()) and abs(c.get_linewidths()[0] - 3.2) < 1e-9]
+    return [c for c in fig.axes[0].collections if len(c.get_linewidths()) and abs(c.get_linewidths()[0] - 1.3) < 1e-9]
 
 
 def test_mpl_zero_boundary_drawn_only_when_crossing():
     crossing = mpl_export.heatmap_mpl(10, 40, 10, 100, vpd.LEAF, -2.0, point=(T_AIR, RH))
-    assert len(_mpl_zero_artists(crossing)) == 1
+    assert len(_mpl_zero_artists(crossing)) == 1 and _mpl_zero_artists(crossing)[0].get_linestyle()[0][1] is not None
     assert ZERO in [t.get_text() for t in crossing.axes[0].get_legend().get_texts()]
     assert "possible condensation" in crossing.get_supxlabel()
     assert mpl_export.to_bytes(crossing, "png", 80)[:4] == b"\x89PNG" and mpl_export.to_bytes(crossing, "pdf")[:5] == b"%PDF-"
