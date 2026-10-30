@@ -47,6 +47,27 @@ streamlit run app.py
 
 The exported R script needs R with the `ggplot2` package (optional: `metR` for contour labels).
 
+## Calculation API (local, experimental)
+
+A small FastAPI service exposes the forward calculation. It is **local only and not yet publicly deployed**;
+reverse calculation, graph endpoints and hosting are not implemented.
+
+```powershell
+cd vpd_calculator
+pip install -r requirements-api.txt
+uvicorn api:app --reload          # interactive docs: http://127.0.0.1:8000/docs
+```
+
+```powershell
+curl -X POST http://127.0.0.1:8000/v1/calculate -H "Content-Type: application/json" `
+  -d '{"air_temperature_c": 22, "relative_humidity_percent": 60, "measured_leaf_temperature_c": 20}'
+```
+
+Give either `leaf_temperature_offset_c` or `measured_leaf_temperature_c`, not both (neither means zero offset). The
+response has `results` (leaf temperature, air and leaf VPD, saturation and actual vapour pressures, in °C and kPa, at
+full precision), `possible_condensation` (true when leaf VPD is negative), warnings and the equation source (FAO-56
+Eq. 11). Inputs use the same limits as the calculator.
+
 ## Testing
 
 From `vpd_calculator/`:
@@ -84,6 +105,7 @@ Everything is in `vpd_calculator/`; run `streamlit run app.py` from that folder.
 | `rscript.py` | Reproducible R script export (calculation + ggplot2 heatmap) |
 | `share.py` | Shareable-link and setup-file (JSON) encoding |
 | `treatments.py` | Treatment-comparison table: row validation and calculation |
+| `api.py` | Local FastAPI service for the forward calculation (`POST /v1/calculate`) |
 | `citation.py` | Software citation strings |
 | `validation.py` | Published table values, calculated benchmarks and comparisons for the validation section |
 | `tests/`, `scripts/` | pytest suite (science, AppTest, Playwright, exports) and CI helper script |
