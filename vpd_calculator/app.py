@@ -15,7 +15,6 @@ import plots
 import presets
 import rscript
 import share
-import treatments
 import validation
 import vpd
 
@@ -26,7 +25,7 @@ def _refresh_helper_modules():
     Streamlit Cloud re-runs app.py after a push but keeps already-imported helper modules in
     memory, which can leave a new app.py talking to an old module.
     """
-    for name in ("vpd", "live_calculator", "share", "presets", "citation", "validation", "plots", "mpl_export", "rscript", "treatments"):
+    for name in ("vpd", "live_calculator", "share", "presets", "citation", "validation", "plots", "mpl_export", "rscript"):
         mod = importlib.import_module(name)
         stamp = Path(mod.__file__).stat().st_mtime_ns
         if getattr(mod, "_loaded_stamp", None) != stamp:
@@ -162,39 +161,8 @@ def to_csv(df):
     return df.to_csv(index=False).encode("utf-8")
 
 
-tab_calc, tab_daynight, tab_compare, tab_heat, tab_methods = st.tabs(
-    ["Calculator", "Acceptable range", "Compare treatments", "VPD Heatmap", "Methods & References"])
-
-# ==========================================================================
-# Compare treatments (rendered before the Calculator tab so the setup download can read the current rows)
-# ==========================================================================
-with tab_compare:
-    st.subheader("Compare treatments")
-    st.caption("Edit the table to compare conditions side by side: add rows at the bottom, delete rows with the "
-               "row selector. Leaf temperature = air temperature + offset. Rows with missing or out-of-range "
-               "values are flagged and not calculated. This table is independent of the other tabs.")
-    st.session_state.setdefault("cmp_base", treatments.EXAMPLES.copy())      # unchanged base; edits live in the widget
-    edited = st.data_editor(
-        st.session_state["cmp_base"], num_rows="dynamic", hide_index=True, key="cmp_editor", width="stretch",
-        column_config={
-            treatments.NAME: st.column_config.TextColumn(treatments.NAME, required=False),
-            treatments.T_AIR: st.column_config.NumberColumn(treatments.T_AIR, format="%.1f", step=0.1),
-            treatments.RH: st.column_config.NumberColumn(treatments.RH, format="%.1f", step=0.1),
-            treatments.OFFSET: st.column_config.NumberColumn(treatments.OFFSET, format="%.1f", step=0.1),
-        })
-    compared = treatments.evaluate(edited)
-    st.markdown("**Results**")
-    st.dataframe(compared, hide_index=True, width="stretch", key="cmp_results",
-                 column_config={c: st.column_config.NumberColumn(c, format="%.1f")
-                                for c in (treatments.T_AIR, treatments.RH, treatments.OFFSET, *treatments.RESULTS)})
-    flagged = compared[compared[treatments.STATUS] != treatments.OK]
-    for _, row in flagged.iterrows():
-        (st.warning if row[treatments.STATUS] == treatments.CONDENSATION else st.error)(
-            f"{row[treatments.NAME] or 'Unnamed row'}: {row[treatments.STATUS]}")
-    st.download_button("Download comparison (CSV)", treatments.to_csv(compared), "vpd_treatment_comparison.csv",
-                       "text/csv", key="dl_compare_csv")
-    st.caption("The table shows one decimal; the CSV keeps full calculation precision.")
-
+tab_calc, tab_daynight, tab_heat, tab_methods = st.tabs(
+    ["Calculator", "Acceptable range", "VPD Heatmap", "Methods & References"])
 
 # ==========================================================================
 # Calculator
@@ -414,10 +382,6 @@ with tab_heat:
     o1, o2 = st.columns(2)
     show_target = o1.checkbox("Highlight acceptable range (Day or Night, as chosen in the Calculator)", value=True, key="hm_target")
     show_point = o2.checkbox("Mark selected temperature/RH", value=True, key="hm_point")
-    show_treatments = st.checkbox("Show comparison treatments", value=False, key="hm_treatments",
-                                  help="Markers for the valid rows of the Compare treatments tab.")
-    st.caption("Comparison markers are drawn in the interactive chart, the PNG/PDF/SVG downloads and the R script "
-               "(valid treatments inside the axes only).")
     hm_kind = kind_from_label(hm_kind_label)
 
     if t_min >= t_max or rh_min >= rh_max:
@@ -433,20 +397,9 @@ with tab_heat:
                 note += (f" The offset is derived from the measured leaf temperature ({measured:.1f} °C) and the "
                          f"Calculator's air temperature ({t_air:.1f} °C).")
             st.caption(note)
-        markers, n_outside = ([], 0)
-        if show_treatments:
-            markers, n_outside = treatments.markers_in_view(compared, t_min, t_max, rh_min, rh_max)
         fig = plots.heatmap_figure(t_min, t_max, rh_min, rh_max, hm_kind, offset, cscale, cstep,
-                                   zmax_in or None, pt, tg, target_kind=ikind, treatments=markers or None)
+                                   zmax_in or None, pt, tg, target_kind=ikind)
         st.plotly_chart(fig, width="stretch", config={"toImageButtonOptions": {"format": "png", "scale": 2}})
-        if n_outside:
-            st.caption(f"{n_outside} calculated treatment{'s are' if n_outside > 1 else ' is'} outside the "
-                       "displayed axes and not shown.")
-        leaf_in_chart = hm_kind == vpd.LEAF or (tg is not None and ikind == vpd.LEAF)
-        if leaf_in_chart and any(abs(m["offset"] - offset) > 1e-9 for m in markers):
-            st.caption(f"Marker values use each treatment's own leaf offset; the chart background uses the "
-                       f"Calculator's offset ({offset:+.1f} °C), so a marker's canopy VPD can differ from the "
-                       "background colour at its position.")
         if any(trace.name == vpd.ZERO_LABEL for trace in fig.data):
             st.caption("Negative canopy VPD (beyond the saturation line) indicates possible condensation.")
         if tg:
@@ -465,7 +418,7 @@ with tab_heat:
 
         hm_params = dict(t_min=t_min, t_max=t_max, rh_min=rh_min, rh_max=rh_max, kind=hm_kind,
                          offset=offset, colorscale=cscale, contour_step=cstep, z_max=zmax_in or None,
-                         point=pt, target=tg, target_kind=ikind, treatments=markers or None)
+                         point=pt, target=tg, target_kind=ikind)
         leaf_t = measured if measured is not None else t_air + offset
         r_code = rscript.build_r_script(
             mode_a, t_air, st.session_state["rh"], st.session_state["target_vpd"],
@@ -475,13 +428,10 @@ with tab_heat:
                            "vpd_heatmap.R", "text/plain", key="dl_rscript",
                            help="Reproduces the calculation and this heatmap with ggplot2 (PNG and PDF export).")
 
-        marker_sig = tuple((m["name"], m["t_air"], m["rh"], m["offset"]) for m in markers)
-        sig = (t_min, t_max, rh_min, rh_max, hm_kind, round(offset, 6), cscale, cstep, zmax_in, pt, tg, ikind,
-               show_treatments, marker_sig)
+        sig = (t_min, t_max, rh_min, rh_max, hm_kind, round(offset, 6), cscale, cstep, zmax_in, pt, tg, ikind)
         if d2.button("Prepare figure downloads", key="png_prepare"):
             export = mpl_export.heatmap_mpl(t_min, t_max, rh_min, rh_max, hm_kind, offset, cscale, cstep,
-                                            zmax_in or None, pt, tg, target_kind=ikind,
-                                            treatments=markers or None)
+                                            zmax_in or None, pt, tg, target_kind=ikind)
             st.session_state["png"] = (sig, mpl_export.to_bytes(export, "png", 300),
                                        mpl_export.to_bytes(export, "pdf"), mpl_export.to_bytes(export, "svg"))
         cached = st.session_state.get("png")

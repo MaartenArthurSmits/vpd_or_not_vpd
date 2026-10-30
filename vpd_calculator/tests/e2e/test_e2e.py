@@ -63,8 +63,8 @@ def test_app_loads_with_default_result(page):
     result(page).wait_for(timeout=TIMEOUT)
     assert f"{vpd.vpd_leaf(22, 60, 21):.2f} kPa" in result(page).inner_text()      # default offset -1 degC
     assert "Air VPD: 1.06 kPa" in result(page, "secondary").inner_text()
-    assert page.get_by_role("tab").count() == 5
-    for tab in ("Calculator", "Acceptable range", "Compare treatments", "VPD Heatmap", "Methods & References"):
+    assert page.get_by_role("tab").count() == 4
+    for tab in ("Calculator", "Acceptable range", "VPD Heatmap", "Methods & References"):
         assert page.get_by_role("tab", name=tab).count() == 1
 
 
@@ -248,7 +248,7 @@ def test_full_page_screenshots(browser, app_url, artifacts_dir, console_log, nam
     pg.on("pageerror", lambda e: console_log.append({"type": "pageerror", "text": str(e)}))
     pg.goto(app_url)
     pg.get_by_text("Calculation mode").first.wait_for(timeout=60_000)
-    for tab, slug in (("Calculator", "calculator"), ("Acceptable range", "daynight"), ("Compare treatments", "compare"),
+    for tab, slug in (("Calculator", "calculator"), ("Acceptable range", "daynight"),
                       ("VPD Heatmap", "heatmap"),
                       ("Methods & References", "methods")):
         pg.get_by_role("tab", name=tab).click()

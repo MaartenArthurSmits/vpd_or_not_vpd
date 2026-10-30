@@ -10,17 +10,15 @@ built with Python, Streamlit and Plotly.
 
 ## Features
 
-Five tabs: **Calculator**, **Acceptable range**, **Compare treatments**, **VPD Heatmap**, **Methods & References**.
+Four tabs: **Calculator**, **Acceptable range**, **VPD Heatmap**, **Methods & References**.
 
 - **Bidirectional calculator:** VPD from temperature and RH, or the RH required for a target air or leaf VPD.
 - **Leaf temperature:** an offset (illustrative scenarios 0, -1, -2, +1, +2 °C or custom) or a measured value, with an
   explanation of air versus leaf VPD.
 - **Acceptable range:** one range preset (published starting ranges with sources) sets the Day and Night VPD limits, which
   can then be edited independently. The Calculator and this tab show the same result and range bar.
-- **Compare treatments:** an editable table of treatments (air temperature, RH, leaf offset) with leaf temperature,
-  air VPD and leaf VPD for each valid row, flagged condensation risk and a CSV download.
 - **Heatmap:** interactive temperature x RH plot (air or leaf VPD) with contours, target range and selected point.
-- **Exports:** grid CSV, treatment CSV, publication-quality heatmap PNG (300 dpi) and PDF rendered with Matplotlib
+- **Exports:** grid CSV, publication-quality heatmap PNG (300 dpi) and PDF rendered with Matplotlib
   (no browser needed), and a reproducible R script that recreates the calculation and the heatmap with ggplot2.
 - **Shareable link:** the Acceptable range tab has a Copy link button; the link restores calculator, Day/Night and
   heatmap settings (comparison treatments are not included).

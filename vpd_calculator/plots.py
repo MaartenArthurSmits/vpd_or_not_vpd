@@ -14,13 +14,11 @@ COLORSCALES = ["RdYlBu_r", "Viridis", "Turbo", "Cividis", "Plasma", "YlGnBu", "S
 def heatmap_figure(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0,
                    colorscale="RdYlBu_r", contour_step=0.5, z_max=None,
                    point=None, target=None, template=None,
-                   width=None, height=650, target_kind=None, treatments=None) -> go.Figure:
+                   width=None, height=650, target_kind=None) -> go.Figure:
     """Temperature x RH heatmap with labelled contours.
 
     point  : (t_air, rh) selected state or None
     target : (vpd_low, vpd_high) user-defined interval or None
-    treatments : list of dicts (name, t_air, rh, offset, t_leaf, vpd_air, vpd_leaf) drawn as labelled markers;
-                 their values use each treatment's own leaf offset, not the chart's.
     target_kind : VPD type the target interval refers to (default: same as `kind`). The colours
                   follow `kind`; the target shading and dashed contours follow `target_kind`.
     """
@@ -83,36 +81,13 @@ def heatmap_figure(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0,
 
     point_in_view = point is not None and t_min <= point[0] <= t_max and rh_min <= point[1] <= rh_max
 
-    def treatment_hover(m):
-        return (f"<b>{m['name']}</b><br>Air {m['t_air']:.1f} °C, RH {m['rh']:.1f} %<br>"
-                f"Leaf offset {m['offset']:+.1f} °C, leaf {m['t_leaf']:.1f} °C<br>"
-                f"Air VPD {m['vpd_air']:.1f} kPa<br>Canopy VPD {m['vpd_leaf']:.1f} kPa")
-
-    # Treatments at exactly the selected point's coordinates (coordinates are never shifted).
-    shared = [m for m in (treatments or []) if point_in_view
-              and abs(m["t_air"] - point[0]) < 1e-9 and abs(m["rh"] - point[1]) < 1e-9]
-    if treatments:
-        fig.add_trace(go.Scatter(
-            x=[m["t_air"] for m in treatments], y=[m["rh"] for m in treatments], mode="markers+text",
-            name="Comparison treatments", text=[m["name"] for m in treatments],
-            textposition=["bottom right" if m in shared else "top center" for m in treatments],
-            textfont=dict(size=11, color="black"),
-            # a larger diamond stays visible as an outline around the star drawn on top of it
-            marker=dict(symbol="diamond", size=[26 if m in shared else 14 for m in treatments], color="black",
-                        line=dict(color="white", width=2)),
-            hoverinfo="text", hovertext=[treatment_hover(m) for m in treatments],
-        ))
-
     if point_in_view:
         t, rh = point
         v = vpd.vpd_matrix([t], [rh], kind, offset)[0, 0]
         hover = f"Selected<br>{t:.1f} °C, {rh:.1f} %<br>{label}: {v:.1f} kPa"
-        if shared:      # the star is on top, so it also lists the treatments that share its position
-            hover += "<br><br>Comparison treatment" + ("s" if len(shared) > 1 else "") + " at this point:<br>"
-            hover += "<br><br>".join(treatment_hover(m) for m in shared)
         fig.add_trace(go.Scatter(
             x=[t], y=[rh], mode="markers", name="Selected",
-            marker=dict(symbol="star", size=15 if shared else 18, color="white",
+            marker=dict(symbol="star", size=18, color="white",
                         line=dict(color="black", width=2)),
             hovertemplate=hover + "<extra></extra>",
         ))

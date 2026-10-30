@@ -29,26 +29,6 @@ def _num(x) -> str:
     return repr(float(x))
 
 
-def _r_string(text) -> str:
-    """R string literal for arbitrary text (quotes, backslashes, newlines and control characters escaped)."""
-    out = ['"']
-    for ch in str(text).replace("\x00", ""):
-        if ch in '"\\':
-            out.append("\\" + ch)
-        elif ch == "\n":
-            out.append("\\n")
-        elif ch == "\r":
-            out.append("\\r")
-        elif ch == "\t":
-            out.append("\\t")
-        elif ord(ch) < 32 or ord(ch) == 127:
-            out.append(f"\\u{ord(ch):04x}")
-        else:
-            out.append(ch)
-    out.append('"')
-    return "".join(out)
-
-
 def _heatmap_block(h: dict) -> list:
     kind = h.get("kind", vpd.AIR)
     offset = float(h.get("offset", 0.0))
@@ -64,13 +44,6 @@ def _heatmap_block(h: dict) -> list:
     label = "Air VPD" if kind == vpd.AIR else "Canopy VPD"
     tkind = h.get("target_kind") or kind          # colours follow `kind`, the target follows `target_kind`
     tlabel = "Air VPD" if tkind == vpd.AIR else "Canopy VPD"
-    treatment_note = ""
-    leaf_in_chart = kind == vpd.LEAF or (h.get("target") is not None and tkind == vpd.LEAF)
-    if h.get("treatments"):
-        treatment_note = "\\nDiamonds: comparison treatments."
-        if leaf_in_chart and any(abs(m["offset"] - offset) > 1e-9 for m in h["treatments"]):
-            treatment_note += (f" Treatment markers use each treatment's own leaf offset; the background and target "
-                               f"use the chart's offset ({offset:+.1f} degC).")
     subtitle_target = ""
     if h.get("target") is not None:
         lo_t, hi_t = h["target"]
@@ -103,22 +76,8 @@ def _heatmap_block(h: dict) -> list:
         L += [f"hm_target_kind <- \"{'air' if tkind == vpd.AIR else 'leaf'}\"    # VPD type the target refers to",
               "t_ref_target <- if (hm_target_kind == \"leaf\") grid$temperature + hm_offset else grid$temperature",
               "grid$vpd_target <- es(t_ref_target) - es(grid$temperature) * grid$rh / 100"]
-    tr = list(h.get("treatments") or [])
     point_in_view = h.get("point") is not None and h["t_min"] <= h["point"][0] <= h["t_max"] \
         and h["rh_min"] <= h["point"][1] <= h["rh_max"]
-    shared_flags = [bool(point_in_view and abs(m["t_air"] - h["point"][0]) < 1e-9
-                         and abs(m["rh"] - h["point"][1]) < 1e-9) for m in tr]
-    if tr:
-        L += ["",
-              "# Comparison treatments (valid rows of the Compare treatments table, exact coordinates)",
-              "treatments <- data.frame(",
-              f"  name = c({', '.join(_r_string(m['name']) for m in tr)}),",
-              f"  temperature = c({', '.join(_num(m['t_air']) for m in tr)}),",
-              f"  rh = c({', '.join(_num(m['rh']) for m in tr)}),",
-              f"  offset = c({', '.join(_num(m['offset']) for m in tr)}),",
-              f"  shared = c({', '.join('TRUE' if f else 'FALSE' for f in shared_flags)}),",
-              "  stringsAsFactors = FALSE",
-              ")"]
     L += [
         "",
         "p <- ggplot(grid, aes(x = temperature, y = rh)) +",
@@ -134,18 +93,9 @@ def _heatmap_block(h: dict) -> list:
         lo, hi = h["target"]
         L += [f"  geom_contour(aes(z = vpd_target), breaks = unique(c({_num(lo)}, {_num(hi)})), colour = \"black\",",
               "               linewidth = 0.9, linetype = \"dashed\") +"]
-    if tr:      # diamonds (a larger one where a treatment sits at the selected point); labels offset, not the data
-        L += ["  geom_point(data = treatments[!treatments$shared, ], aes(x = temperature, y = rh), shape = 23,",
-              "             size = 3.5, fill = \"black\", colour = \"white\", stroke = 0.9) +",
-              "  geom_point(data = treatments[treatments$shared, ], aes(x = temperature, y = rh), shape = 23,",
-              "             size = 7, fill = \"black\", colour = \"white\", stroke = 0.9) +",
-              "  geom_text(data = treatments[!treatments$shared, ], aes(x = temperature, y = rh, label = name),",
-              "            vjust = -1, size = 3, fontface = \"bold\") +",
-              "  geom_text(data = treatments[treatments$shared, ], aes(x = temperature, y = rh, label = name),",
-              "            hjust = -0.3, vjust = 1.8, size = 3, fontface = \"bold\") +"]
-    if point_in_view:       # drawn after the treatments so the selected point stays on top
+    if point_in_view:
         t, rh = h["point"]
-        L += [f"  annotate(\"point\", x = {_num(t)}, y = {_num(rh)}, shape = 21, size = {3.5 if any(shared_flags) else 5},",
+        L += [f"  annotate(\"point\", x = {_num(t)}, y = {_num(rh)}, shape = 21, size = 5,",
               "           fill = \"white\", colour = \"black\", stroke = 1.2) +"]
     L += [
         "  coord_cartesian(expand = FALSE) +",
@@ -154,8 +104,7 @@ def _heatmap_block(h: dict) -> list:
         f"       title = \"{label} as a function of temperature and relative humidity\",",
         *([f"       subtitle = \"{subtitle_target}\","] if h.get("target") is not None else []),
         f"       caption = \"Saturation vapour pressure: FAO-56 (Allen et al., 1998), Eq. 11"
-        f"{'. Negative leaf VPD indicates possible condensation.' if zero_drawn else ''}"
-        f"{treatment_note}\") +",
+        f"{'. Negative leaf VPD indicates possible condensation.' if zero_drawn else ''}\") +",
         "  theme_minimal(base_size = 12)",
         "",
         "# Optional contour labels if the metR package is available",
@@ -179,7 +128,6 @@ def build_r_script(mode_a: bool, t_air: float, rh: float, target_vpd: float, kin
     Output lines of the numerical part are 'name: value' so they can be compared with the app.
     `heatmap` keys: t_min, t_max, rh_min, rh_max, kind, offset, colorscale, contour_step, z_max,
     target (low, high) or None, target_kind (VPD type of the target; default `kind`),
-    treatments (list of dicts name/t_air/rh/offset, drawn as diamonds) or None,
     point (T, RH) or None.
     """
     L = [

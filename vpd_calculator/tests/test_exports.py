@@ -162,7 +162,7 @@ def test_r_script_target_uses_its_own_kind(hm_kind, target_kind):
     assert f'hm_kind   <- "{hm_kind}"' in s and f'hm_target_kind <- "{target_kind}"' in s
     assert "grid$vpd_target <- es(t_ref_target) - es(grid$temperature) * grid$rh / 100" in s
     assert "aes(z = vpd_target), breaks = unique(c(0.8, 1.2))" in s
-    assert f"target {'Air' if target_kind == vpd.AIR else 'Leaf'} VPD 0.8-1.2 kPa" in s
+    assert f"target {'Air' if target_kind == vpd.AIR else 'Canopy'} VPD 0.8-1.2 kPa" in s
     assert "hm_offset <- -2.0" in s
 
 
@@ -187,7 +187,7 @@ def test_r_script_target_region_matches_acceptance_point(tmp_path, hm_kind, targ
 
 
 @pytest.mark.parametrize("target_kind,label", [(vpd.AIR, "target Air VPD 1.0 kPa"),
-                                                (vpd.LEAF, "target Leaf VPD 1.0 kPa")])
+                                                (vpd.LEAF, "target Canopy VPD 1.0 kPa")])
 def test_r_script_single_target_uses_one_contour_and_single_value_label(target_kind, label):
     h = HEATMAP | {"kind": vpd.AIR, "target": (1.0, 1.0), "target_kind": target_kind}
     s = rscript.build_r_script(True, 22.0, 60.0, 1.0, vpd.AIR, 20.0, (1.0, 1.0), target_kind, heatmap=h)
@@ -213,39 +213,3 @@ def test_r_script_zero_boundary_only_when_it_crosses_the_leaf_grid():
     assert "scale_colour_manual" in crossing and "possible condensation" in crossing
     for s in (script(vpd.LEAF, 0.0), script(vpd.LEAF, 2.0), script(vpd.AIR, -2.0)):
         assert "Leaf saturation" not in s and "possible condensation" not in s
-
-
-# ---- treatment markers in the R script ---------------------------------------------------------------
-TREATMENTS = [
-    {"name": 'Control "A"\\x', "t_air": 22.0, "rh": 60.0, "offset": -2.0},
-    {"name": "Warm\nline", "t_air": 33.0, "rh": 60.0, "offset": 1.0},
-]
-
-
-def test_r_string_escaping():
-    assert rscript._r_string('say "hi"\\') == '"say \\"hi\\"\\\\"'
-    assert rscript._r_string("a\nb\tc\x01") == '"a\\nb\\tc\\u0001"' and rscript._r_string("°C") == '"°C"'
-
-
-def test_r_script_treatment_data_layers_and_note():
-    h = HEATMAP | {"kind": vpd.LEAF, "offset": -2.0, "target": (0.8, 1.2), "target_kind": vpd.LEAF, "treatments": TREATMENTS}
-    s = rscript.build_r_script(True, 22.0, 60.0, 1.0, vpd.AIR, 20.0, (0.8, 1.2), vpd.LEAF, heatmap=h)
-    assert 'name = c("Control \\"A\\"\\\\x", "Warm\\nline"),' in s
-    assert "temperature = c(22.0, 33.0)," in s and "rh = c(60.0, 60.0)," in s and "offset = c(-2.0, 1.0)," in s
-    assert "shared = c(TRUE, FALSE)," in s                                    # point (22, 60) coincides with the first
-    assert "shape = 23" in s and s.index("geom_point(data = treatments") < s.index('annotate("point"')   # star after
-    assert "Diamonds: comparison treatments" in s and "each treatment's own leaf offset" in s
-    plain = rscript.build_r_script(True, 22.0, 60.0, 1.0, vpd.AIR, 20.0, (0.8, 1.2), vpd.LEAF,
-                                   heatmap=h | {"treatments": None})
-    assert "treatments" not in plain and "Diamonds" not in plain
-
-
-@pytest.mark.skipif(not r_has_ggplot2(), reason="Rscript or ggplot2 not installed")
-def test_r_script_with_treatments_runs(tmp_path):
-    h = HEATMAP | {"kind": vpd.LEAF, "offset": -2.0, "treatments": TREATMENTS}
-    path = tmp_path / "vpd_heatmap.R"
-    path.write_text(rscript.build_r_script(True, 22.0, 60.0, 1.0, vpd.AIR, 20.0, (0.8, 1.2), vpd.AIR, heatmap=h),
-                    encoding="utf-8")
-    res = subprocess.run(["Rscript", str(path)], capture_output=True, text=True, timeout=300, cwd=tmp_path)
-    assert res.returncode == 0, res.stderr
-    assert (tmp_path / "vpd_heatmap.png").read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"

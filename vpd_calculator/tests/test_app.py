@@ -67,9 +67,9 @@ def test_default_run_has_no_exceptions_and_known_values():
     assert at.selectbox(key="range_preset__w").value == presets.DEFAULT_PRESET
 
 
-def test_exactly_five_tabs():
+def test_exactly_four_tabs():
     at = new_app().run()
-    assert [t.label for t in at.tabs] == ["Calculator", "Acceptable range", "Compare treatments", "VPD Heatmap",
+    assert [t.label for t in at.tabs] == ["Calculator", "Acceptable range", "VPD Heatmap",
                                           "Methods & References"]
 
 
@@ -410,7 +410,7 @@ def test_calculator_has_no_csv_json_or_share_section():
     assert not any(b.key == "setup_apply" for b in calc.button)
     labels = [getattr(b.proto, "label", "") for b in at.get("download_button")]
     assert not any("settings and results" in x or "setup (JSON)" in x for x in labels)
-    assert "Download comparison (CSV)" in labels and "Download grid (CSV)" in labels
+    assert "Download grid (CSV)" in labels and not any("comparison" in x.lower() for x in labels)
 
 
 # ---- heatmap settings in shareable links -----------------------------------------------------------
@@ -541,7 +541,7 @@ def test_partial_heatmap_link_does_not_error_and_keeps_other_defaults(partial):
 
 # ---- heatmap leaf-temperature assumption caption -----------------------------------------------------
 def leaf_note(at):
-    return [c.value for c in at.tabs[3].caption if "constant leaf–air offset" in c.value]
+    return [c.value for c in at.tabs[2].caption if "constant leaf–air offset" in c.value]
 
 
 def test_heatmap_leaf_assumption_caption_for_leaf_colours_and_leaf_targets():
@@ -560,7 +560,7 @@ def test_heatmap_leaf_assumption_caption_for_leaf_colours_and_leaf_targets():
 
 def test_heatmap_condensation_note_only_when_the_zero_line_is_drawn():
     def notes(params):
-        return [c.value for c in new_app_with(params).tabs[3].caption if "possible condensation" in c.value]
+        return [c.value for c in new_app_with(params).tabs[2].caption if "possible condensation" in c.value]
     new_app_with = app_with_params
     assert len(notes({"hk": "leaf", "off": "-2"})) == 1          # zero boundary crosses the chart
     assert notes({"hk": "leaf", "off": "0"}) == []               # VPD = 0 only at the 100 % RH edge
@@ -620,165 +620,6 @@ def test_older_cached_heatmap_export_without_svg_is_ignored_without_error():
     assert not at.exception and heatmap_downloads(at) == set()
     at.button(key="png_prepare").click().run()                              # preparing again refreshes it
     assert len(at.session_state["png"]) == 4 and "Download SVG" in heatmap_downloads(at)
-
-
-# ---- Compare treatments tab ------------------------------------------------------------------------------
-import treatments as treat  # noqa: E402
-
-
-def compare_csv_spy(monkeypatch):
-    import streamlit as st
-    calls = []
-    original = st.download_button
-
-    def spy(label, data, *args, **kwargs):
-        if label == "Download comparison (CSV)":
-            calls.append(data)
-        return original(label, data, *args, **kwargs)
-
-    monkeypatch.setattr(st, "download_button", spy)
-    return calls
-
-
-def compare_results(at):
-    (df,) = [d.value for d in at.tabs[2].dataframe if treat.STATUS in d.value.columns]   # not the editor
-    return df
-
-
-def test_compare_tab_starts_with_two_example_rows_and_matching_results(monkeypatch):
-    import io
-    calls = compare_csv_spy(monkeypatch)
-    at = new_app().run()
-    assert not at.exception
-    df = compare_results(at)
-    assert df[treat.NAME].tolist() == ["Example A (22 °C, 60 % RH)", "Example B (33 °C, 60 % RH)"]
-    assert df[treat.VPD_AIR].tolist() == [vpd.vpd_air(22, 60), vpd.vpd_air(33, 60)]
-    assert df[treat.VPD_LEAF].tolist() == [vpd.vpd_leaf(22, 60, 22), vpd.vpd_leaf(33, 60, 33)]
-    csv = io.StringIO(calls[-1].decode())
-    import pandas as pd
-    back = pd.read_csv(csv)
-    assert back[treat.VPD_AIR].tolist() == pytest.approx([vpd.vpd_air(22, 60), vpd.vpd_air(33, 60)], abs=1e-12)
-    assert back[treat.VPD_AIR].iloc[0] != round(back[treat.VPD_AIR].iloc[0], 1)       # full precision in the CSV
-    assert not at.error and not at.warning or all("treatment" not in w.value.lower() for w in at.error)
-
-
-def test_compare_table_edits_add_invalid_rows_and_stay_independent(monkeypatch):
-    calls = compare_csv_spy(monkeypatch)
-    at = new_app().run()
-    set_num(at, "t_air", 28.0)                                                    # other tabs' settings
-    at.session_state["cmp_editor"] = {
-        "edited_rows": {0: {treat.T_AIR: 30.0, treat.RH: 100.0, treat.OFFSET: -3.0}, 1: {treat.RH: 55.0}},
-        "added_rows": [{treat.NAME: "Cold", treat.T_AIR: 15.0, treat.RH: 50.0, treat.OFFSET: 0.0},
-                       {treat.NAME: "Broken", treat.T_AIR: 15.0}],
-        "deleted_rows": [],
-    }
-    at.run()
-    assert not at.exception
-    df = compare_results(at)
-    assert df[treat.NAME].tolist() == ["Example A (22 °C, 60 % RH)", "Example B (33 °C, 60 % RH)", "Cold", "Broken"]
-    assert df[treat.VPD_AIR].iloc[0] == vpd.vpd_air(30, 100) and df[treat.T_LEAF].iloc[0] == 27.0
-    assert df[treat.VPD_LEAF].iloc[0] < 0 and df[treat.VPD_AIR].iloc[1] == vpd.vpd_air(33, 55)
-    assert df[treat.VPD_AIR].iloc[2] == vpd.vpd_air(15, 50)
-    assert df[treat.STATUS].iloc[3].startswith("Row 4 not calculated") and pd_isna(df[treat.VPD_AIR].iloc[3])
-    errors = [e.value for e in at.error]
-    assert any("Broken" in e and "Relative humidity missing" in e for e in errors)
-    assert any("Example A" in w.value and "condensation" in w.value for w in at.warning)  # saturated air, leaf 3 degC cooler
-    # settings of the other tabs are untouched; rows survive a plain rerun
-    assert at.session_state["t_air"] == 28.0 and at.session_state["dn_lo_day"] == 0.7 and at.session_state["hm_tmin"] == 10.0
-    at.run()
-    assert compare_results(at)[treat.NAME].tolist()[-2:] == ["Cold", "Broken"] and b"Cold" in calls[-1]
-    at.session_state["cmp_editor"] = {"edited_rows": {}, "added_rows": [], "deleted_rows": [0, 1]}
-    at.run()
-    assert not at.exception and compare_results(at).empty
-
-
-def pd_isna(x):
-    import math
-    return x is None or (isinstance(x, float) and math.isnan(x))
-
-
-# ---- comparison-treatment markers on the heatmap ----------------------------------------------------------
-def treatment_trace(at):
-    return [d for d in heatmap_spec(at)["data"] if d.get("name") == "Comparison treatments"]
-
-
-def heatmap_captions(at):
-    return " ".join(c.value for c in at.tabs[3].caption)
-
-
-def test_treatment_markers_toggle_hover_explanation_and_edits(monkeypatch):
-    at = new_app().run()
-    set_num(at, "calc_offset", 0.0)                                                    # explicit 0 offset (default is -1.0)
-    assert at.checkbox(key="hm_treatments").value is False and treatment_trace(at) == []
-    assert "PNG/PDF/SVG downloads and the R script" in heatmap_captions(at)
-    at.session_state["cmp_editor"] = {
-        "edited_rows": {0: {treat.OFFSET: -2.0}, 1: {treat.OFFSET: 1.0}},
-        "added_rows": [{treat.NAME: "Far", treat.T_AIR: 50.0, treat.RH: 60.0, treat.OFFSET: 0.0},
-                       {treat.NAME: "Broken", treat.T_AIR: 25.0}],
-        "deleted_rows": [],
-    }
-    at.radio(key="hm_kind").set_value(share.LEAF_LABEL)
-    at.checkbox(key="hm_treatments").set_value(True).run()
-    assert not at.exception
-    (trace,) = treatment_trace(at)
-    assert trace["x"] == [22.0, 33.0] and trace["y"] == [60.0, 60.0]                    # Far (outside) and Broken skipped
-    assert trace["text"] == ["Example A (22 °C, 60 % RH)", "Example B (33 °C, 60 % RH)"]
-    a, b = trace["hovertext"]
-    assert "Leaf offset -2.0 °C, leaf 20.0 °C" in a and f"Canopy VPD {vpd.vpd_leaf(22, 60, 20):.1f} kPa" in a
-    assert "Leaf offset +1.0 °C, leaf 34.0 °C" in b and f"Air VPD {vpd.vpd_air(33, 60):.1f} kPa" in b
-    text = heatmap_captions(at)
-    assert "1 calculated treatment is outside the displayed axes" in text
-    assert "Marker values use each treatment's own leaf offset" in text and "Calculator's offset (+0.0 °C)" in text
-    # background, target and star layers are unchanged by the markers
-    names = [d.get("name") for d in heatmap_spec(at)["data"]]
-    assert names.count("Selected") == 1 and names[-1] == "Selected"
-    # editing a treatment updates the marker and its hover values
-    at.session_state["cmp_editor"] = {
-        "edited_rows": {0: {treat.T_AIR: 25.0, treat.OFFSET: 0.0}, 1: {treat.OFFSET: 1.0}},
-        "added_rows": [], "deleted_rows": [1]}
-    at.run()
-    (trace,) = treatment_trace(at)
-    assert trace["x"] == [25.0] and "Leaf offset +0.0 °C, leaf 25.0 °C" in trace["hovertext"][0]
-    assert "outside the displayed axes" not in heatmap_captions(at)
-    assert "Marker values use" not in heatmap_captions(at)                             # offsets now equal the Calculator's
-
-
-def test_treatment_markers_without_leaf_vpd_in_the_chart_need_no_offset_explanation():
-    at = new_app()
-    at.session_state["cmp_editor"] = {"edited_rows": {0: {treat.OFFSET: -2.0}}, "added_rows": [], "deleted_rows": []}
-    at.run()
-    at.checkbox(key="hm_target").set_value(False).run()                                 # no canopy-target overlay
-    at.checkbox(key="hm_treatments").set_value(True).run()                              # air heatmap only
-    assert len(treatment_trace(at)) == 1 and "Marker values use" not in heatmap_captions(at)
-
-
-def test_prepared_figure_downloads_follow_the_comparison_treatments_and_toggle(monkeypatch):
-    calls = capture_heatmap_downloads(monkeypatch)
-    at = new_app().run()
-    at.session_state["cmp_editor"] = {"edited_rows": {0: {treat.OFFSET: -2.0}}, "added_rows": [], "deleted_rows": []}
-    at.checkbox(key="hm_treatments").set_value(True).run()
-    at.button(key="png_prepare").click().run()
-    assert heatmap_downloads(at) == {"Download PNG", "Download PDF", "Download SVG"}
-    svg = calls["Download SVG"]["data"].decode("utf-8")
-    assert "Example A (22 °C, 60 % RH)" in svg and "Example B (33 °C, 60 % RH)" in svg      # markers are in the export
-    at.run()                                                                                  # unchanged: still offered
-    assert heatmap_downloads(at)
-    at.session_state["cmp_editor"] = {"edited_rows": {0: {treat.OFFSET: -2.0, treat.NAME: "Renamed"}}, "added_rows": [],
-                                      "deleted_rows": []}
-    at.run()
-    assert heatmap_downloads(at) == set()                                                     # renamed -> stale
-    at.button(key="png_prepare").click().run()
-    assert "Renamed" in calls["Download SVG"]["data"].decode("utf-8") and heatmap_downloads(at)
-    at.session_state["cmp_editor"] = {"edited_rows": {0: {treat.OFFSET: -2.0, treat.NAME: "Renamed"}}, "added_rows": [],
-                                      "deleted_rows": [1]}
-    at.run()
-    assert heatmap_downloads(at) == set()                                                     # deleted -> stale
-    at.button(key="png_prepare").click().run()
-    assert heatmap_downloads(at)
-    at.checkbox(key="hm_treatments").set_value(False).run()
-    assert heatmap_downloads(at) == set()                                                     # hidden -> stale
-    at.button(key="png_prepare").click().run()
-    assert "Renamed" not in calls["Download SVG"]["data"].decode("utf-8")                    # no markers when hidden
 
 
 # ---- acceptable range: presets, shared conditions, reset ----------------------------------------------------

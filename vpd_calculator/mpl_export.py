@@ -27,12 +27,10 @@ CMAPS = {  # app colour-scale names -> Matplotlib colormaps
 
 def heatmap_mpl(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0, colorscale="RdYlBu_r",
                 contour_step=0.5, z_max=None, point=None, target=None,
-                figsize=(10.0, 6.5), target_kind=None, treatments=None) -> Figure:
+                figsize=(10.0, 6.5), target_kind=None) -> Figure:
     """Temperature x RH heatmap with labelled contours, target range and selected point.
 
     Colours follow `kind`; the target shading/contours follow `target_kind` (default: `kind`).
-    `treatments`: list of dicts (name, t_air, rh, offset, ...) drawn as labelled diamonds at their exact
-    coordinates; the selected-point star is drawn above them.
     """
     temps = np.arange(t_min, t_max + 1e-9, 0.25)
     rhs = np.arange(rh_min, rh_max + 1e-9, 0.5)
@@ -73,23 +71,9 @@ def heatmap_mpl(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0, colorsca
                               label=vpd.target_label(tkind, lo, hi)))
 
     point_in_view = point is not None and t_min <= point[0] <= t_max and rh_min <= point[1] <= rh_max
-    shared = [m for m in (treatments or []) if point_in_view
-              and abs(m["t_air"] - point[0]) < 1e-9 and abs(m["rh"] - point[1]) < 1e-9]
-    if treatments:
-        # Exact coordinates; a treatment at the selected point gets a larger diamond (an outline around the star).
-        ax.scatter([m["t_air"] for m in treatments], [m["rh"] for m in treatments],
-                   s=[900 if m in shared else 75 for m in treatments], marker="D", color="black",
-                   edgecolors="white", linewidths=1.6, zorder=5)
-        for m in treatments:
-            offset_pts, ha = ((24, -22), "left") if m in shared else ((0, 10), "center")
-            ax.annotate(m["name"], (m["t_air"], m["rh"]), xytext=offset_pts, textcoords="offset points", ha=ha,
-                        fontsize=8.5, zorder=7,
-                        bbox=dict(boxstyle="round,pad=0.15", facecolor="white", edgecolor="none", alpha=0.7))
-        handles.append(Line2D([], [], marker="D", color="black", markeredgecolor="white", linestyle="none",
-                              markersize=8, label="Comparison treatments"))
     if point_in_view:
         t, rh = point
-        ax.plot([t], [rh], marker="*", markersize=21 if shared else 16, markerfacecolor="white",
+        ax.plot([t], [rh], marker="*", markersize=16, markerfacecolor="white",
                 markeredgecolor="black", markeredgewidth=1.5, linestyle="none", zorder=6,
                 label=f"Selected: {t:.1f} °C, {rh:.1f} %")
     entries = ax.get_legend_handles_labels()[0] + handles
@@ -109,10 +93,6 @@ def heatmap_mpl(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0, colorsca
                      f"leaf temperature = air temperature {sign} {abs(offset):.1f} °C throughout the chart.")
     if zero_drawn:
         notes.append("Negative leaf VPD (beyond the saturation line) indicates possible condensation.")
-    leaf_in_chart = kind == vpd.LEAF or (target is not None and tkind == vpd.LEAF)
-    if treatments and leaf_in_chart and any(abs(m["offset"] - offset) > 1e-9 for m in treatments):
-        notes.append(f"Treatment markers use each treatment's own leaf offset; the background and target use "
-                     f"the chart's offset ({offset:+.1f} °C).")
     notes.append("Saturation vapour pressure: FAO-56 (Allen et al., 1998), Eq. 11.")
     # Captions are wrapped and placed in a figure-level label, so constrained layout reserves their space.
     fig.supxlabel("\n".join(textwrap.fill(n, width=125) for n in notes), x=0.01, ha="left", fontsize=8.5)
