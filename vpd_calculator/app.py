@@ -64,13 +64,6 @@ DEFAULTS = {
 for k, v in DEFAULTS.items():
     st.session_state.setdefault(k, v)
 
-# Every shareable setting with its default (used when a setup file omits a setting).
-CHOICE_DEFAULTS = {
-    "mode": share.MODE_A, "target_kind": share.AIR_LABEL, "interval_kind": share.AIR_LABEL,
-    "calc_leaf_method": share.OFFSET_METHOD, "dn_kind_day": share.AIR_LABEL, "dn_kind_night": share.AIR_LABEL,
-    "hm_kind": share.AIR_LABEL,
-}
-SETTING_DEFAULTS = DEFAULTS | share.HEATMAP_DEFAULTS | CHOICE_DEFAULTS
 
 
 def derive_preset_state():
@@ -87,31 +80,6 @@ if "_share_loaded" not in st.session_state:
     st.session_state.update(share.parse_params(st.query_params.to_dict()))
     derive_preset_state()
     st.session_state["_share_loaded"] = True
-
-
-def apply_setup():
-    """'Apply setup' callback. Runs before the script reruns, so widget-bound keys may be changed safely.
-
-    The whole file is validated first; on any problem nothing is changed.
-    """
-    upload = st.session_state.get("setup_upload")
-    if upload is None:
-        st.session_state["_setup_status"] = ("error", "Choose a setup file first. Nothing was changed.")
-        return
-    params, comparison, error = share.parse_setup(upload.getvalue())
-    if error:
-        st.session_state["_setup_status"] = ("error", f"Setup not applied: {error}")
-        return
-    for _p in ("day", "night"):
-        st.session_state.pop(f"dn_preset_{_p}", None)         # saved identity comes only from the file
-    st.session_state.update(SETTING_DEFAULTS)                 # settings missing from the file use the defaults
-    st.session_state.update(share.parse_params(params))
-    derive_preset_state()
-    if comparison is not None:                                 # version-2 file: comparison table and marker toggle
-        st.session_state["cmp_base"] = treatments.records_to_frame(comparison["rows"])
-        st.session_state.pop("cmp_editor", None)               # edits belong to the previous table
-        st.session_state["hm_treatments"] = comparison["show_markers"]
-    st.session_state["_setup_status"] = ("ok", f"Setup \"{upload.name}\" applied.")
 
 
 def linked(label, key, lo, hi, step, fmt="%.1f", num_min=None, num_max=None, help=None, after=None):
@@ -290,14 +258,11 @@ with tab_calc:
     measured = st.session_state["calc_leaf_meas"] if measured_in else None
     offset = st.session_state["calc_leaf_meas"] - t_air if measured_in else st.session_state["calc_offset"]
     if mode_a:
-        r = vpd.calculate_vpd(t_air, st.session_state["rh"], offset, measured)
         current_rh = st.session_state["rh"]
-        results_row = r.as_dict() | {"mode": "Calculate VPD"}
     else:
         res = vpd.calculate_required_rh(t_air, st.session_state["target_vpd"], kind_from_label(kind_label),
                                         offset, measured)
         current_rh = min(max(res.rh, 0.0), 100.0) if res.attainable else None   # only tiny float-tolerance clipping
-        results_row = res.as_dict() | {"mode": "Calculate required RH"}
 
     with st.expander("Leaf-temperature guidance"):
         st.markdown(LEAF_GUIDANCE)
@@ -309,48 +274,8 @@ with tab_calc:
 
 
 
-    # ---- Export current settings --------------------------------------------
-    st.divider()
-    settings = pd.DataFrame(
-        [{"quantity": k, "value": v} for k, v in (
-            {"mode": results_row.get("mode"), "target_kind": results_row.get("kind"),
-             "target_vpd_kPa": results_row.get("target_vpd"),
-             "range_low_kPa": lo, "range_high_kPa": hi, "range_kind": ikind} |
-            {k: v for k, v in results_row.items()
-             if k not in ("mode", "kind", "target_vpd", "warnings", "message")}).items()])
-    st.download_button("Download current settings and results (CSV)", to_csv(settings),
-                       "vpd_current_settings.csv", "text/csv", key="dl_settings_csv")
-
     # Keep the address bar in sync so the current URL is always a shareable link.
     st.query_params.from_dict(share.build_params(st.session_state))
-    with st.expander("Share these settings"):
-        st.caption("Opening this link restores the calculator mode, temperature, RH, target VPD, "
-                   "leaf temperature and target range, plus, independently for day and night: air "
-                   "temperature, leaf-temperature offset, lower and upper VPD limits, whether the range "
-                   "applies to air or leaf VPD, and the selected growth-stage preset (or Custom). "
-                   "It also restores the heatmap settings: VPD type, temperature and RH limits, colour "
-                   "scale and maximum, contour spacing, and the target and selected-point toggles. Comparison "
-                   "treatments are saved in the JSON setup file below, not in links.")
-        st.code(share.share_url(st.session_state), language=None)
-        comparison_setup = {"rows": treatments.rows_to_records(edited),
-                            "show_markers": bool(st.session_state.get("hm_treatments", False))}
-        st.download_button("Download setup (JSON)",
-                           share.setup_json(st.session_state, comparison_setup).encode("utf-8"),
-                           share.SETUP_FILENAME, "application/json", key="dl_setup_json")
-        st.caption("The JSON file records the calculation and heatmap settings (the same settings as the link) and, "
-                   "in addition, the Compare treatments input rows and the 'Show comparison treatments' toggle. "
-                   "Results are recalculated when a file is loaded; images and other session data are not saved.")
-        st.file_uploader("Load setup (JSON)", type=["json"], key="setup_upload",
-                         help="Choosing a file does not change anything until you press Apply setup.")
-        st.button("Apply setup", key="setup_apply", on_click=apply_setup,
-                  disabled=st.session_state.get("setup_upload") is None)
-        st.caption("Applying a setup replaces the calculator, day/night and heatmap settings (and, for version-2 "
-                   "files, the comparison treatments and marker toggle). Settings missing from the file return to "
-                   "their defaults; an invalid file changes nothing. Version-1 files leave the comparison "
-                   "treatments unchanged.")
-        _status = st.session_state.pop("_setup_status", None)
-        if _status:
-            (st.success if _status[0] == "ok" else st.error)(_status[1])
 
 # ==========================================================================
 # Day & Night
@@ -361,6 +286,8 @@ with tab_daynight:
     st.caption("Configure the day and night conditions independently. The required RH range is calculated "
                "at each period's own temperature and optional leaf offset. Presets are illustrative. "
                "The Calculator compares its current VPD with the Day or Night range set here.")
+    live_calculator.copy_link_button(share.share_url(st.session_state))
+    st.caption("Share your current settings.")
 
     def period_section(period: str):
         p = period.lower()

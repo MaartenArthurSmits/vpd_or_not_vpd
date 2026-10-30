@@ -10,7 +10,7 @@ built with Python, Streamlit and Plotly.
 
 ## Features
 
-Five tabs: **Calculator**, **Day & Night**, **Compare treatments**, **VPD Heatmap**, **Methods & References**.
+Five tabs: **Calculator**, **Acceptable range**, **Compare treatments**, **VPD Heatmap**, **Methods & References**.
 
 - **Bidirectional calculator:** VPD from temperature and RH, or the RH required for a target air or leaf VPD.
 - **Leaf temperature:** an offset (illustrative scenarios 0, -1, -2, +1, +2 °C or custom) or a measured value, with an
@@ -22,10 +22,10 @@ Five tabs: **Calculator**, **Day & Night**, **Compare treatments**, **VPD Heatma
 - **Compare treatments:** an editable table of treatments (air temperature, RH, leaf offset) with leaf temperature,
   air VPD and leaf VPD for each valid row, flagged condensation risk and a CSV download.
 - **Heatmap:** interactive temperature x RH plot (air or leaf VPD) with contours, target range and selected point.
-- **Exports:** grid CSV, settings CSV, publication-quality heatmap PNG (300 dpi) and PDF rendered with Matplotlib
+- **Exports:** grid CSV, treatment CSV, publication-quality heatmap PNG (300 dpi) and PDF rendered with Matplotlib
   (no browser needed), and a reproducible R script that recreates the calculation and the heatmap with ggplot2.
-- **Shareable links and setup file:** a link restores calculator, day/night and heatmap settings; the same settings, plus the Compare
-  treatments table, can be saved as `vpd-setup.json` and loaded again.
+- **Shareable link:** the Acceptable range tab has a Copy link button; the link restores calculator, Day/Night and
+  heatmap settings (comparison treatments are not included).
 - **Scientific validation** against FAO-56 tables and an alternative published equation (Methods & References).
 
 Values are displayed with one decimal place; calculations, validation tables and CSV exports keep full precision.

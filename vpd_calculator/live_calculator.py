@@ -206,7 +206,51 @@ export default function (component) {
 }
 """
 
+COPY_CSS = """
+button { font: inherit; color: inherit; background: var(--st-background-color, #fff); cursor: pointer;
+         border: 1px solid rgba(128,128,128,0.5); border-radius: 0.5rem; padding: 0.25rem 0.75rem; }
+button:hover { border-color: var(--st-primary-color, #ff4b4b); }
+span { margin-left: 0.5rem; font-size: 0.85rem; color: #1b7f3b; }
+"""
+
+COPY_JS = r"""
+export default function (component) {
+  const { data, parentElement } = component;
+  for (const old of Array.from(parentElement.children)) {
+    if (old.classList && old.classList.contains('copy')) old.remove();
+  }
+  const root = document.createElement('div');
+  root.className = 'copy';
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.textContent = 'Copy link';
+  const note = document.createElement('span');
+  note.setAttribute('role', 'status');
+  const copy = async (text) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (e) {                                   // clipboard API unavailable (e.g. insecure context)
+      const box = document.createElement('textarea');
+      box.value = text;
+      document.body.appendChild(box);
+      box.select();
+      document.execCommand('copy');
+      box.remove();
+    }
+  };
+  button.addEventListener('click', async () => {
+    await copy(data.url);
+    note.textContent = 'Link copied';
+    setTimeout(() => { note.textContent = ''; }, 2000);
+  });
+  root.append(button, note);
+  parentElement.appendChild(root);
+  return () => root.remove();
+}
+"""
+
 _component = None
+_copy_component = None
 
 
 def _mount(**kwargs):
@@ -219,3 +263,11 @@ def _mount(**kwargs):
 def live_calculator(data: dict, on_values):
     """Mount the component. `on_values` runs (before the rerun) when the user commits new values."""
     return _mount(key="calc_live", data=data, default={"values": None}, on_values_change=on_values)
+
+
+def copy_link_button(url: str):
+    """A small button that copies `url` (the current shareable link) to the clipboard."""
+    global _copy_component
+    if _copy_component is None:
+        _copy_component = st.components.v2.component("vpd_copy_link", css=COPY_CSS, js=COPY_JS)
+    return _copy_component(key="copy_link", data={"url": url})

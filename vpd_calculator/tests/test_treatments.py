@@ -72,18 +72,3 @@ def test_markers_in_view_skip_invalid_rows_and_count_those_outside_the_axes():
     a = inside[0]
     ref = vpd.calculate_vpd(22.0, 60.0, -2.0)
     assert (a["t_leaf"], a["vpd_air"], a["vpd_leaf"], a["offset"]) == (ref.t_leaf, ref.vpd_air, ref.vpd_leaf, -2.0)
-
-
-def test_rows_round_trip_through_json_records_keeping_order_names_and_drafts():
-    import json
-    frame = pd.DataFrame({tr.NAME: ["Control", None, "Draft", ""], tr.T_AIR: [22.0, float("nan"), 30.0, 25.0],
-                          tr.RH: [60.0, 50.0, None, 55.0], tr.OFFSET: [0.0, None, float("nan"), -2.0]})
-    records = tr.rows_to_records(frame)
-    text = json.dumps(records, allow_nan=False)                         # no NaN may reach the file
-    assert "NaN" not in text and json.loads(text)[1] == {"name": None, "t_air": None, "rh": 50.0, "offset": None}
-    back = tr.records_to_frame(json.loads(text))
-    assert back[tr.NAME].tolist() == ["Control", None, "Draft", ""]
-    assert back[tr.T_AIR].tolist()[0] == 22.0 and math.isnan(back[tr.T_AIR].iloc[1])
-    # the existing validation gives the same messages before and after the round trip
-    assert tr.evaluate(back)[tr.STATUS].tolist() == tr.evaluate(frame)[tr.STATUS].tolist()
-    assert tr.records_to_frame([]).empty and list(tr.records_to_frame([]).columns) == tr.INPUTS

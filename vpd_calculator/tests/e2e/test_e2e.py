@@ -205,15 +205,6 @@ def test_download_r_script_with_ggplot2_heatmap_and_reproduce(page, artifacts_di
         assert (run_dir / "vpd_heatmap.pdf").read_bytes()[:5] == b"%PDF-"
 
 
-@pytest.mark.exports
-def test_download_settings_csv(page, artifacts_dir):
-    path = download(page, "Download current settings and results (CSV)", artifacts_dir, "vpd_settings.csv")
-    df = pd.read_csv(path)
-    assert list(df.columns) == ["quantity", "value"]
-    values = dict(zip(df.quantity, df.value))
-    assert float(values["vpd_air"]) == pytest.approx(vpd.vpd_air(22, 60), abs=1e-9)   # full precision
-
-
 def test_methods_citation_formats_and_references(page):
     open_tab(page, "Methods & References")
     page.get_by_text("How to cite this software").first.click()

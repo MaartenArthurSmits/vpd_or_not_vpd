@@ -6,7 +6,6 @@ out-of-range values in a link are ignored rather than clamped.
 
 from __future__ import annotations
 
-import json
 import math
 from typing import Mapping
 from urllib.parse import urlencode
@@ -157,117 +156,6 @@ def build_params(state: Mapping) -> dict:
     for q, key in _BOOL_KEYS.items():
         p[q] = "1" if state.get(key, HEATMAP_DEFAULTS[key]) else "0"
     return p
-
-
-# Every query-parameter name parse_params understands (derived from the tables above).
-RECOGNIZED_PARAMS = (
-    set(_NUMERIC) | {"m", "k", "ik", "hk", "hcs", "hst", "hg", "hp"}
-    | {pre + suffix for pre in _PERIODS.values() for suffix in (*_PERIOD_NUMERIC, "k", "p")}
-)
-
-
-def validate_setup(raw) -> tuple[dict | None, str | None]:
-    """Parameters-only view of `parse_setup`: (parameters, None) or (None, error message)."""
-    params, _comparison, error = parse_setup(raw)
-    return params, error
-
-
-COMPARISON_ROW_KEYS = ("name", "t_air", "rh", "offset")      # inputs of one Compare treatments row
-MAX_COMPARISON_ROWS = 500
-
-
-def _validate_comparison(section) -> tuple[dict | None, str | None]:
-    """Structure check of the comparison section; row values are judged later by treatments.evaluate."""
-    if not isinstance(section, dict):
-        return None, "The comparison section must be an object."
-    rows, show = section.get("rows", []), section.get("show_markers", False)
-    if not isinstance(rows, list) or len(rows) > MAX_COMPARISON_ROWS:
-        return None, f"The comparison rows must be a list of at most {MAX_COMPARISON_ROWS} rows."
-    if not isinstance(show, bool):
-        return None, "The comparison marker toggle (show_markers) must be true or false."
-    clean = []
-    for n, row in enumerate(rows, start=1):
-        if not isinstance(row, dict):
-            return None, f"Comparison row {n} must be an object."
-        record = {}
-        for key in COMPARISON_ROW_KEYS:
-            value = row.get(key)
-            if value is None:
-                pass
-            elif key == "name":
-                if not isinstance(value, str):
-                    return None, f"Comparison row {n}: name must be text or null."
-            elif isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
-                return None, f"Comparison row {n}: {key} must be a finite number or null."
-            record[key] = value if key == "name" or value is None else float(value)
-        clean.append(record)
-    return {"rows": clean, "show_markers": show}, None
-
-
-def parse_setup(raw) -> tuple[dict | None, dict | None, str | None]:
-    """Strictly validate a setup file (bytes or str) before anything is applied.
-
-    Returns (parameters, comparison, None) or (None, None, error message). `comparison` is None for version-1
-    files (or version-2 files without the section). Unlike links, an invalid value for a recognized parameter is
-    an error. Unknown parameter keys are ignored. Parameters only contain recognized keys, as strings.
-    """
-    try:
-        text = raw.decode("utf-8-sig") if isinstance(raw, (bytes, bytearray)) else raw
-        doc = json.loads(text)
-    except (UnicodeDecodeError, ValueError) as exc:
-        return None, None, f"The file is not valid JSON ({exc.__class__.__name__}: {str(exc)[:80]})."
-    if not isinstance(doc, dict):
-        return None, None, "The file is not a VPD calculator setup (the top level must be a JSON object)."
-    if doc.get("format") != SETUP_FORMAT:
-        return None, None, f"Unsupported file format: expected \"{SETUP_FORMAT}\"."
-    version = doc.get("schema_version")
-    if isinstance(version, bool) or version not in SETUP_READABLE_VERSIONS:
-        return None, None, "Unsupported schema_version: this app reads versions 1 and 2."
-    params = doc.get("parameters")
-    if not isinstance(params, dict):
-        return None, None, "The setup has no \"parameters\" object."
-    clean: dict = {}
-    problems = []
-    for key, value in params.items():
-        if key not in RECOGNIZED_PARAMS:
-            continue                                            # unknown keys are ignored
-        if isinstance(value, bool) or not isinstance(value, (str, int, float)):
-            problems.append(key)
-            continue
-        text_value = value if isinstance(value, str) else format(value, "g")
-        if not parse_params({key: text_value}):
-            problems.append(key)
-            continue
-        clean[key] = text_value
-    if problems:
-        return None, None, "Invalid value for: " + ", ".join(sorted(problems)) + ". Nothing was changed."
-    comparison = None
-    if version == 2 and "comparison" in doc:
-        comparison, problem = _validate_comparison(doc["comparison"])
-        if problem:
-            return None, None, problem + " Nothing was changed."
-    return clean, comparison, None
-
-
-SETUP_FORMAT = "vpd-calculator-setup"
-SETUP_SCHEMA_VERSION = 2          # new downloads; version 1 files (no comparison section) are still read
-SETUP_READABLE_VERSIONS = (1, 2)
-SETUP_FILENAME = "vpd-setup.json"
-
-
-def setup_document(state: Mapping, comparison: dict | None = None) -> dict:
-    """Downloadable setup document.
-
-    `parameters` is exactly the shared-link serialization (build_params). `comparison` holds the Compare treatments
-    input rows ({"name", "t_air", "rh", "offset"}, null for empty cells) and the marker toggle; inputs only.
-    """
-    comparison = comparison if comparison is not None else {"rows": [], "show_markers": False}
-    return {"format": SETUP_FORMAT, "schema_version": SETUP_SCHEMA_VERSION, "parameters": build_params(state),
-            "comparison": comparison}
-
-
-def setup_json(state: Mapping, comparison: dict | None = None) -> str:
-    return json.dumps(setup_document(state, comparison), indent=2, allow_nan=False) + "\n"
 
 
 def share_url(state: Mapping, base: str = APP_URL) -> str:

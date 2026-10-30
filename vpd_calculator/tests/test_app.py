@@ -606,10 +606,28 @@ def test_app_url_round_trip_into_a_fresh_session():
     assert fresh.selectbox(key="dn_preset_night").value == "Custom"
 
 
-def test_share_explanation_mentions_day_night_settings():
+def test_calculator_has_no_csv_json_or_share_section():
     at = new_app().run()
-    text = " ".join(c.value for c in at.caption)
-    assert "independently for day and night" in text and "preset" in text
+    calc = at.tabs[0]
+    assert not any(e.label == "Share these settings" for e in at.expander)
+    assert not calc.get("download_button") and not calc.get("file_uploader")
+    assert not any(b.key == "setup_apply" for b in calc.button)
+    labels = [getattr(b.proto, "label", "") for b in at.get("download_button")]
+    assert not any("settings and results" in x or "setup (JSON)" in x for x in labels)
+    assert "Download comparison (CSV)" in labels and "Download grid (CSV)" in labels
+
+
+def test_acceptable_range_has_one_copy_link_control_that_follows_edits():
+    at = new_app().run()
+    comps = {c.proto.component_name: json.loads(c.proto.json) for c in at.get("bidi_component")}
+    assert "Share your current settings." in [c.value for c in at.tabs[1].caption]
+    url = comps["vpd_copy_link"]["url"]
+    assert url == share.share_url(at.session_state) and "nt=17" in url
+    set_num(at, "dn_t_night", 14.0)
+    at.radio(key="dn_kind_night").set_value(share.LEAF_LABEL).run()
+    url = json.loads([c for c in at.get("bidi_component") if c.proto.component_name == "vpd_copy_link"][0].proto.json)["url"]
+    assert "nt=14" in url and "nk=leaf" in url
+    assert not any("?" in x.value and "http" in x.value for x in at.code)           # the URL itself is not displayed
 
 
 # ---- heatmap settings in shareable links -----------------------------------------------------------
@@ -737,199 +755,6 @@ def test_partial_heatmap_link_does_not_error_and_keeps_other_defaults(partial):
     assert not at.exception
     assert at.number_input(key="hm_tmax").value == 40.0 and at.number_input(key="hm_rhmin").value == 10.0
     assert {k: qp(at, k) for k in partial} == {k: v for k, v in partial.items()}   # URL keeps the saved values
-
-
-# ---- setup (JSON) download ---------------------------------------------------------------------------
-def capture_setup_downloads(monkeypatch):
-    """Record the data/filename given to the 'Download setup (JSON)' button on every run."""
-    import streamlit as st
-    calls = []
-    original = st.download_button
-
-    def spy(label, data, file_name=None, *args, **kwargs):
-        if label == "Download setup (JSON)":
-            calls.append({"data": data, "file_name": file_name, "mime": args[0] if args else kwargs.get("mime")})
-        return original(label, data, file_name, *args, **kwargs)
-
-    monkeypatch.setattr(st, "download_button", spy)
-    return calls
-
-
-def test_setup_json_download_is_valid_and_has_format_and_schema(monkeypatch):
-    import json
-    calls = capture_setup_downloads(monkeypatch)
-    at = new_app().run()
-    assert not at.exception and calls
-    call = calls[-1]
-    assert call["file_name"] == "vpd-setup.json" and call["mime"] == "application/json"
-    doc = json.loads(call["data"].decode("utf-8"))
-    assert doc["format"] == "vpd-calculator-setup" and doc["schema_version"] == 2
-    assert doc["parameters"] == share.build_params(at.session_state)
-    assert any("records the calculation and heatmap settings" in c.value for c in at.caption)
-
-
-def test_setup_json_preserves_non_default_settings_from_all_sections(monkeypatch):
-    import json
-    calls = capture_setup_downloads(monkeypatch)
-    at = app_with_params(ACCEPTANCE | {"t": "25", "rh": "40", "lo": "0.9", "hi": "1.3"} | HEATMAP_LINK)
-    p = json.loads(calls[-1]["data"].decode("utf-8"))["parameters"]
-    assert (p["t"], p["rh"], p["lo"], p["hi"]) == ("25", "40", "0.9", "1.3")                    # calculator
-    assert (p["dt"], p["doff"], p["dk"], p["dp"], p["dlo"], p["dhi"]) == ("33", "-2", "leaf", "veg", "1", "1")
-    assert (p["nt"], p["noff"], p["nlo"], p["nhi"], p["nk"]) == ("17", "1", "0.6", "1", "air")  # night
-    assert (p["hk"], p["htmin"], p["htmax"], p["hrmin"], p["hrmax"], p["hz"], p["hcs"], p["hst"],
-            p["hg"], p["hp"]) == ("leaf", "12", "38", "25", "95", "3.5", "Viridis", "0.2", "0", "0")  # heatmap
-    assert not any("png" in k for k in p)
-
-
-def test_setup_json_reflects_edits_made_after_a_previous_run(monkeypatch):
-    import json
-    calls = capture_setup_downloads(monkeypatch)
-    at = new_app().run()
-    first = json.loads(calls[-1]["data"].decode("utf-8"))["parameters"]
-    set_num(at, "t_air", 29.0)                                           # calculator
-    set_num(at, "dn_t_night", 14.0)                                      # day/night
-    at.selectbox(key="hm_cs").set_value("Cividis").run()                 # heatmap
-    second = json.loads(calls[-1]["data"].decode("utf-8"))["parameters"]
-    assert (first["t"], first["nt"], first["hcs"]) == ("22", "17", "RdYlBu_r")
-    assert (second["t"], second["nt"], second["hcs"]) == ("29", "14", "Cividis")
-    assert second == share.build_params(at.session_state)
-
-
-# ---- setup (JSON) import ---------------------------------------------------------------------------
-def upload_setup(at, content, name="vpd-setup.json"):
-    if isinstance(content, str):
-        content = content.encode("utf-8")
-    at.file_uploader(key="setup_upload").set_value((name, content, "application/json")).run()
-    assert not at.exception
-    return at
-
-
-def apply_setup_click(at):
-    at.button(key="setup_apply").click().run()
-    assert not at.exception
-    return at
-
-
-SETUP_LINK = ACCEPTANCE | {"t": "25", "rh": "40", "lo": "0.9", "hi": "1.3", "ik": "leaf", "off": "-2"} | HEATMAP_LINK
-
-
-def saved_setup(monkeypatch, params=SETUP_LINK):
-    calls = capture_setup_downloads(monkeypatch)
-    at = app_with_params(params)
-    return calls[-1]["data"], share.build_params(at.session_state), at
-
-
-def widget_snapshot(at):
-    s = at.session_state
-    keys = ["mode", "t_air", "rh", "target_vpd", "vpd_lo", "vpd_hi", "calc_offset",
-            "dn_t_day", "dn_off_day", "dn_lo_day", "dn_hi_day", "dn_kind_day", "dn_preset_day",
-            "dn_t_night", "dn_off_night", "dn_lo_night", "dn_hi_night", "dn_kind_night", "dn_preset_night",
-            "hm_kind", "hm_tmin", "hm_tmax", "hm_rhmin", "hm_rhmax", "hm_cs", "hm_step", "hm_zmax",
-            "hm_target", "hm_point"]
-    return {k: s[k] for k in keys}
-
-
-def test_export_change_import_restores_the_saved_setup(monkeypatch):
-    data, saved_params, at = saved_setup(monkeypatch)
-    saved_state = widget_snapshot(at)
-    # change settings in all three sections
-    set_num(at, "t_air", 31.0)
-    set_num(at, "dn_t_day", 20.0)
-    at.selectbox(key="hm_cs").set_value("Greys").run()
-    at.radio(key="hm_kind").set_value(share.AIR_LABEL).run()
-    assert widget_snapshot(at) != saved_state
-    # uploading alone changes nothing
-    changed = widget_snapshot(at)
-    upload_setup(at, data)
-    assert widget_snapshot(at) == changed
-    # applying restores everything
-    apply_setup_click(at)
-    assert widget_snapshot(at) == saved_state
-    assert share.build_params(at.session_state) == saved_params
-    assert any("applied" in s.value for s in at.success)
-    # controls, results, chart and URL reflect the setup
-    assert at.number_input(key="dn_t_day__num").value == 33.0 and at.number_input(key="hm_tmin").value == 12.0
-    assert at.selectbox(key="hm_cs").value == "Viridis" and at.radio(key="hm_kind").value == share.LEAF_LABEL
-    assert live_values(at)["t_air"] == 25.0 and live_values(at)["rh"] == 40.0
-    assert metric_starting(at, "Day required RH for leaf VPD 1.0 kPa at 33.0 °C")
-    assert heatmap_spec(at)["layout"]["xaxis"]["range"] == [12, 38]
-    assert {k: qp(at, k) for k in saved_params} == saved_params
-
-
-@pytest.mark.parametrize("content", [
-    "{not json",
-    b"\xff\xfe",
-    '{"format": "other", "schema_version": 1, "parameters": {}}',
-    '{"format": "vpd-calculator-setup", "schema_version": 3, "parameters": {}}',
-    '{"format": "vpd-calculator-setup", "schema_version": 1, "parameters": {"t": "999"}}',
-    '{"format": "vpd-calculator-setup", "schema_version": 1, "parameters": {"t": "30", "hk": "water"}}',
-    '{"format": "vpd-calculator-setup", "schema_version": 1, "parameters": {"dt": "30", "hz": "1e999"}}',
-])
-def test_invalid_setup_files_leave_current_settings_untouched(content):
-    at = app_with_params(SETUP_LINK)
-    before, url_before = widget_snapshot(at), dict(at.query_params)
-    upload_setup(at, content)
-    apply_setup_click(at)
-    assert widget_snapshot(at) == before
-    assert any("Setup not applied" in e.value for e in at.error), [e.value for e in at.error]
-    assert dict(at.query_params) == url_before
-
-
-def test_apply_without_a_file_is_disabled():
-    at = new_app().run()
-    assert at.button(key="setup_apply").disabled
-
-
-def test_missing_parameters_use_the_defaults_and_unknown_keys_are_ignored():
-    at = app_with_params(SETUP_LINK)
-    upload_setup(at, '{"format": "vpd-calculator-setup", "schema_version": 1, '
-                     '"parameters": {"t": "30", "dk": "leaf", "dlo": "1", "dhi": "1", "mystery": "x"}}')
-    apply_setup_click(at)
-    s = at.session_state
-    assert (s["t_air"], s["dn_kind_day"], s["dn_lo_day"], s["dn_hi_day"]) == (30.0, share.LEAF_LABEL, 1.0, 1.0)
-    # everything not in the file is back to the default
-    assert (s["rh"], s["vpd_lo"], s["vpd_hi"], s["calc_offset"], s["interval_kind"]) == (60.0, 0.8, 1.2, 0.0, share.AIR_LABEL)
-    assert (s["dn_t_night"], s["dn_off_night"], s["dn_lo_night"], s["dn_hi_night"], s["dn_kind_night"]) == (
-        17.0, 0.0, 0.8, 1.2, share.AIR_LABEL)
-    assert (s["hm_kind"], s["hm_tmin"], s["hm_tmax"], s["hm_rhmin"], s["hm_rhmax"], s["hm_cs"], s["hm_step"],
-            s["hm_zmax"], s["hm_target"], s["hm_point"]) == (
-        share.AIR_LABEL, 10.0, 40.0, 10.0, 100.0, "RdYlBu_r", 0.5, 0.0, True, True)
-    assert s["dn_preset_day"] == "Vegetative"                       # derived from the 1.0-1.0 limits
-    assert not any("mystery" in k for k in at.query_params)
-
-
-def test_edits_after_import_persist_and_the_file_is_not_reapplied(monkeypatch):
-    data, saved_params, at = saved_setup(monkeypatch)
-    set_num(at, "t_air", 28.0)
-    upload_setup(at, data)
-    apply_setup_click(at)
-    assert at.session_state["t_air"] == 25.0
-    set_num(at, "t_air", 19.0)                                       # edit calculator
-    set_num(at, "dn_t_night", 12.0)                                  # edit day/night
-    at.selectbox(key="hm_cs").set_value("Plasma").run()              # edit heatmap
-    at.run()                                                         # plain rerun
-    s = at.session_state
-    assert (s["t_air"], s["dn_t_night"], s["hm_cs"]) == (19.0, 12.0, "Plasma")
-    assert (qp(at, "t"), qp(at, "nt"), qp(at, "hcs")) == ("19", "12", "Plasma")
-    assert s["dn_t_day"] == 33.0 and s["hm_tmin"] == 12.0           # untouched settings keep the imported values
-    assert not any("applied" in x.value for x in at.success)         # status message is shown once only
-
-
-def test_import_restores_preset_identity_and_custom_status(monkeypatch):
-    params = {"nlo": "0.8", "nhi": "1.2", "np": "veg", "dlo": "0.9", "dhi": "1.3", "dp": "custom"}
-    data, _, _ = saved_setup(monkeypatch, params)
-    at = new_app().run()
-    upload_setup(at, data)
-    apply_setup_click(at)
-    assert at.selectbox(key="dn_preset_night").value == "Vegetative"
-    assert at.selectbox(key="dn_preset_day").value == "Custom"
-    assert (at.session_state["dn_lo_day"], at.session_state["dn_hi_day"]) == (0.9, 1.3)
-
-
-def test_import_explanation_is_shown():
-    at = new_app().run()
-    text = " ".join(c.value for c in at.caption)
-    assert "replaces the calculator, day/night and heatmap settings" in text
 
 
 # ---- heatmap leaf-temperature assumption caption -----------------------------------------------------
@@ -1141,95 +966,6 @@ def test_treatment_markers_without_leaf_vpd_in_the_chart_need_no_offset_explanat
     at.run()
     at.checkbox(key="hm_treatments").set_value(True).run()                              # air heatmap, air target
     assert len(treatment_trace(at)) == 1 and "Marker values use" not in heatmap_captions(at)
-
-
-# ---- setup file (schema version 2): comparison treatments and marker toggle ------------------------------
-V2_ROWS = {
-    "edited_rows": {0: {treat.OFFSET: -2.0}, 1: {treat.NAME: "Warm", treat.OFFSET: 1.0}},
-    "added_rows": [{treat.NAME: "Draft", treat.T_AIR: 30.0}, {treat.T_AIR: 25.0, treat.RH: 40.0}],
-    "deleted_rows": [],
-}
-
-
-def results_status(at):
-    return compare_results(at)[treat.STATUS].tolist()
-
-
-def test_setup_v2_round_trip_with_treatments_incomplete_rows_and_markers(monkeypatch):
-    import json
-    calls = capture_setup_downloads(monkeypatch)
-    at = new_app()
-    at.session_state["cmp_editor"] = V2_ROWS
-    at.run()
-    at.checkbox(key="hm_treatments").set_value(True).run()
-    saved_names, saved_status = compare_results(at)[treat.NAME].tolist(), results_status(at)
-    saved_markers = treatment_trace(at)[0]["hovertext"]
-    text = calls[-1]["data"].decode("utf-8")
-    doc = json.loads(text)
-    assert doc["schema_version"] == 2 and doc["comparison"]["show_markers"] is True and "NaN" not in text
-    rows = doc["comparison"]["rows"]
-    assert [r["name"] for r in rows] == ["Example A (22 °C, 60 % RH)", "Warm", "Draft", None]
-    assert rows[2] == {"name": "Draft", "t_air": 30.0, "rh": None, "offset": None}
-    assert saved_status[2].startswith("Row 3 not calculated") and saved_status[3].startswith("Row 4 not calculated")
-    # a fresh session with other settings: loading the file restores everything together
-    other = new_app().run()
-    set_num(other, "t_air", 31.0)
-    other.session_state["cmp_editor"] = {"edited_rows": {}, "added_rows": [], "deleted_rows": [0, 1]}
-    other.run()
-    assert compare_results(other).empty and not other.checkbox(key="hm_treatments").value
-    upload_setup(other, text)
-    apply_setup_click(other)
-    assert not other.error or all("Setup not applied" not in e.value for e in other.error)
-    assert other.session_state["t_air"] == 22.0                                        # parameters restored too
-    assert compare_results(other)[treat.NAME].tolist() == saved_names
-    assert results_status(other) == saved_status                                        # drafts keep their messages
-    assert other.checkbox(key="hm_treatments").value is True
-    assert treatment_trace(other)[0]["hovertext"] == saved_markers                      # markers recalculated
-    # subsequent edits work normally and are not overwritten by the file
-    other.session_state["cmp_editor"] = {"edited_rows": {2: {treat.RH: 50.0, treat.OFFSET: 0.0}}, "added_rows": [],
-                                         "deleted_rows": []}
-    other.run()
-    assert results_status(other)[2] == "OK" and compare_results(other)[treat.NAME].tolist() == saved_names
-    other.run()
-    assert results_status(other)[2] == "OK" and len(treatment_trace(other)[0]["x"]) == 3
-
-
-def test_malformed_comparison_section_leaves_the_whole_setup_unchanged():
-    at = new_app()
-    at.session_state["cmp_editor"] = V2_ROWS
-    at.run()
-    at.checkbox(key="hm_treatments").set_value(True).run()
-    before = (widget_snapshot(at), compare_results(at)[treat.NAME].tolist(), results_status(at),
-              at.checkbox(key="hm_treatments").value, dict(at.query_params))
-    bad = ('{"format": "vpd-calculator-setup", "schema_version": 2, "parameters": {"t": "30", "dk": "leaf"}, '
-           '"comparison": {"rows": [{"name": "Oops", "t_air": "hot", "rh": 50, "offset": 0}], "show_markers": false}}')
-    upload_setup(at, bad)
-    apply_setup_click(at)
-    after = (widget_snapshot(at), compare_results(at)[treat.NAME].tolist(), results_status(at),
-             at.checkbox(key="hm_treatments").value, dict(at.query_params))
-    assert after == before
-    assert any("Setup not applied" in e.value and "Comparison row 1" in e.value for e in at.error)
-
-
-def test_version_1_setup_still_loads_and_leaves_the_comparison_unchanged():
-    at = new_app()
-    at.session_state["cmp_editor"] = V2_ROWS
-    at.run()
-    at.checkbox(key="hm_treatments").set_value(True).run()
-    names, status = compare_results(at)[treat.NAME].tolist(), results_status(at)
-    upload_setup(at, '{"format": "vpd-calculator-setup", "schema_version": 1, '
-                     '"parameters": {"t": "30", "dk": "leaf", "dlo": "1", "dhi": "1"}}')
-    apply_setup_click(at)
-    assert not any("Setup not applied" in e.value for e in at.error)
-    assert at.session_state["t_air"] == 30.0 and at.session_state["dn_kind_day"] == share.LEAF_LABEL
-    assert compare_results(at)[treat.NAME].tolist() == names and results_status(at) == status
-    assert at.checkbox(key="hm_treatments").value is True and len(treatment_trace(at)) == 1
-
-
-def test_sharing_explanation_separates_json_coverage_from_links():
-    at = new_app().run()
-    text = " ".join(c.value for c in at.caption)
-    assert "not in links" in text and "Compare treatments input rows" in text and "version-2" in text
 
 
 def test_prepared_figure_downloads_follow_the_comparison_treatments_and_toggle(monkeypatch):
