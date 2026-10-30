@@ -15,7 +15,7 @@ import presets
 APP_URL = "https://vpd-or-not-vpd.streamlit.app/"
 
 MODE_A = "Calculate VPD (from temperature and RH)"
-MODE_B = "Calculate required RH (from target VPD)"
+MODE_B = "Calculate RH (from target VPD)"
 OFFSET_METHOD = "Offset from air"
 MEASURED_METHOD = "Measured leaf temperature"
 AIR_LABEL, LEAF_LABEL = "Air VPD", "Leaf VPD"

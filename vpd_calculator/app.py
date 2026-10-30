@@ -233,11 +233,12 @@ with tab_calc:
     interval_ok = lo <= hi
 
     measured_in = leaf_method == share.MEASURED_METHOD
-    live_inputs = [dict(key="t_air", label="Air temperature (°C)", min=0.0, max=45.0, numMin=-10.0, numMax=60.0, dec=1)]
+    live_inputs = []
     if mode_a:
         live_inputs.append(dict(key="rh", label="Relative humidity (%)", min=0.0, max=100.0, numMin=0.0, numMax=100.0, dec=1))
     else:
         live_inputs.append(dict(key="target_vpd", label="Target VPD (kPa)", min=0.0, max=5.0, numMin=-5.0, numMax=10.0, dec=2))
+    live_inputs.append(dict(key="t_air", label="Air temperature (°C)", min=0.0, max=45.0, numMin=-10.0, numMax=60.0, dec=1))
     if measured_in:
         live_inputs.append(dict(key="calc_leaf_meas", label="Measured leaf temperature (°C)", min=-5.0, max=50.0,
                                 numMin=-5.0, numMax=50.0, dec=1))

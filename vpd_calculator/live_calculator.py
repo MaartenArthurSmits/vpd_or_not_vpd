@@ -64,16 +64,22 @@ export function compute(d, v) {
   if (d.mode === 'a') {
     out.rh = v.rh;
   } else {
-    out.rh = d.targetKind === 'air' ? 100 * (1 - v.target_vpd / esA)
-                                     : 100 * (esL - v.target_vpd) / esA;
-    out.attainable = out.rh >= -RH_TOL && out.rh <= 100 + RH_TOL;
-    if (!out.attainable) {
-      const lo = d.targetKind === 'air' ? 0 : esL - esA, hi = d.targetKind === 'air' ? esA : esL;
-      const kind = d.targetKind;
-      out.message = out.rh > 100
-        ? `Unattainable: the target ${kind} VPD of ${k2(v.target_vpd)} is below the minimum reachable VPD (${k2(lo)} at 100% RH) for these temperatures (would need RH = ${f1(out.rh)}%).`
-        : `Unattainable: the target ${kind} VPD of ${k2(v.target_vpd)} exceeds the maximum reachable VPD (${k2(hi)} at 0% RH) for these temperatures (would need RH = ${f1(out.rh)}%).`;
-    }
+    // Two alternative air-RH settings for the same numeric target: as leaf VPD or as air VPD.
+    const mk = (kind) => {
+      const rh = kind === 'air' ? 100 * (1 - v.target_vpd / esA) : 100 * (esL - v.target_vpd) / esA;
+      const attainable = rh >= -RH_TOL && rh <= 100 + RH_TOL;
+      let message = '';
+      if (!attainable) {
+        const lo = kind === 'air' ? 0 : esL - esA, hi = kind === 'air' ? esA : esL;
+        message = rh > 100
+          ? `Unattainable: the target ${kind} VPD of ${k2(v.target_vpd)} is below the minimum reachable VPD (${k2(lo)} at 100% RH) for these temperatures (would need RH = ${f1(rh)}%).`
+          : `Unattainable: the target ${kind} VPD of ${k2(v.target_vpd)} exceeds the maximum reachable VPD (${k2(hi)} at 0% RH) for these temperatures (would need RH = ${f1(rh)}%).`;
+      }
+      return { rh, attainable, message };
+    };
+    out.alt = { air: mk('air'), leaf: mk('leaf') };
+    const main = out.alt[d.targetKind];
+    out.rh = main.rh; out.attainable = main.attainable; out.message = main.message;
   }
   out.ea = esA * out.rh / 100;
   out.air = esA - out.ea;
@@ -147,21 +153,33 @@ function rhBar(d, r, t) {
   });
 }
 
+function reverseHtml(d, r, t) {
+  const main = d.targetKind, other = main === 'air' ? 'leaf' : 'air';
+  const rhText = (x) => `${f1(x)} %`;
+  let h = '';
+  if (r.attainable) {
+    h += `<div class="big" data-testid="primary"><span class="lab">RH for ${main} VPD</span> \u2014 ${rhText(Math.min(Math.max(r.rh, 0), 100))}</div>`;
+    h += t ? rhBar(d, r, t) : `<div class="hint">The acceptable range is invalid (lower limit above upper limit). Fix it in the Acceptable range tab.</div>`;
+  } else {
+    h += `<div class="err">${r.message}</div>`;
+    h += `<div class="big" data-testid="primary"><span class="lab">RH for ${main} VPD (not physically attainable)</span> \u2014 ${rhText(r.rh)}</div>`;
+  }
+  const o = r.alt[other];
+  h += `<div class="second" data-testid="secondary">RH for ${other} VPD${o.attainable ? '' : ' (not physically attainable)'}: <b>${rhText(o.attainable ? Math.min(Math.max(o.rh, 0), 100) : o.rh)}</b></div>`;
+  if (!o.attainable) h += `<div class="err">${o.message}</div>`;
+  h += `<div class="hint">Alternative air-RH settings for the same target VPD, treated as leaf VPD or as air VPD at the current temperatures; not separate humidities inside and outside the leaf.</div>`;
+  h += `<div class="cap">Leaf temperature used: ${f1(r.tLeaf)} \u00b0C (offset ${signed1(r.offset)} \u00b0C)</div>`;
+  if (r.attainable) for (const w of r.warnings) h += `<div class="warn">${w}</div>`;
+  return h;
+}
+
 export function resultsHtml(d, v) {
   const r = compute(d, v);
   const t = d.target;
-  let h = '';
-  if (d.mode === 'b' && !r.attainable) {
-    h += `<div class="err">${r.message}</div>`;
-    h += `<div class="big"><span class="lab">Required relative humidity (not physically attainable)</span><br>${f1(r.rh)} %</div>`;
-    return h;
-  }
-  h += `<div class="big" data-testid="primary"><span class="lab">Leaf VPD</span> \u2014 ${k2(r.leaf)}</div>`;
-  if (d.mode === 'b') {
-    h += `<div class="big2" data-testid="required-rh">Required RH: ${f1(Math.min(Math.max(r.rh, 0), 100))}%</div>`;
-  }
+  if (d.mode === 'b') return reverseHtml(d, r, t);
+  let h = `<div class="big" data-testid="primary"><span class="lab">Leaf VPD</span> \u2014 ${k2(r.leaf)}</div>`;
   if (t) {
-    h += d.mode === 'a' ? leafBar(r, t) : rhBar(d, r, t);
+    h += leafBar(r, t);
   } else {
     h += `<div class="hint">The acceptable range is invalid (lower limit above upper limit). Fix it in the Acceptable range tab.</div>`;
   }

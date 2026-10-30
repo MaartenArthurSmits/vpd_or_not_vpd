@@ -94,10 +94,10 @@ def test_results_follow_the_slider_before_it_is_released(page):
 
 def test_switching_modes_reverse_calculation_and_state_preserved(page):
     page.get_by_text(share.MODE_B, exact=True).click()
-    result(page, "required-rh").get_by_text("62.2%").wait_for(timeout=TIMEOUT)
+    result(page).get_by_text("62.2 %").wait_for(timeout=TIMEOUT)
     set_number(page, "Air temperature (°C)", 30)
     expected = f"{vpd.rh_for_air_vpd(30, 1.0):.1f} %"
-    result(page, "required-rh").get_by_text(expected.replace(" %", "%")).wait_for(timeout=TIMEOUT)
+    result(page).get_by_text(expected).wait_for(timeout=TIMEOUT)
     page.get_by_text(share.MODE_A, exact=True).click()
     expected = f"{vpd.vpd_air(30, 60):.2f} kPa"
     result(page).get_by_text(expected).wait_for(timeout=TIMEOUT)
