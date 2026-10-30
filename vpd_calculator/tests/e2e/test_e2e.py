@@ -61,7 +61,7 @@ def test_app_loads_with_default_result(page):
     assert page.title()
     page.get_by_text("Vapour Pressure Deficit calculator").first.wait_for()
     result(page).wait_for(timeout=TIMEOUT)
-    assert "1.06 kPa" in result(page).inner_text()                        # 22 degC, 60 % RH, zero offset
+    assert f"{vpd.vpd_leaf(22, 60, 21):.2f} kPa" in result(page).inner_text()      # default offset -1 degC
     assert "Air VPD: 1.06 kPa" in result(page, "secondary").inner_text()
     assert page.get_by_role("tab").count() == 5
     for tab in ("Calculator", "Acceptable range", "Compare treatments", "VPD Heatmap", "Methods & References"):
@@ -70,8 +70,9 @@ def test_app_loads_with_default_result(page):
 
 def test_changing_numeric_inputs_updates_results(page):
     set_number(page, "Air temperature (°C)", 30)
+    result(page).get_by_text(f"{vpd.vpd_leaf(30, 60, 29):.2f} kPa").wait_for(timeout=TIMEOUT)    # first edit committed
     set_number(page, "Relative humidity (%)", 50)
-    expected = f"{vpd.vpd_air(30, 50):.2f} kPa"
+    expected = f"{vpd.vpd_leaf(30, 50, 29):.2f} kPa"
     result(page).get_by_text(expected).wait_for(timeout=TIMEOUT)
     assert expected in result(page).inner_text()
 
@@ -86,7 +87,7 @@ def test_results_follow_the_slider_before_it_is_released(page):
     page.mouse.move(box["x"] + box["width"] * 30 / 45, y, steps=8)
     temperature = float(num(page, "Air temperature (°C)").input_value())
     assert temperature > 25
-    expected = f"{vpd.vpd_air(temperature, 60):.2f} kPa"
+    expected = f"{vpd.vpd_leaf(temperature, 60, temperature - 1):.2f} kPa"
     result(page).get_by_text(expected).wait_for(timeout=2_000)             # pointer is still down
     page.mouse.up()
     page.wait_for_function(f"() => location.search.includes('t={temperature:g}')", timeout=TIMEOUT)  # committed
@@ -94,12 +95,13 @@ def test_results_follow_the_slider_before_it_is_released(page):
 
 def test_switching_modes_reverse_calculation_and_state_preserved(page):
     page.get_by_text(share.MODE_B, exact=True).click()
-    result(page).get_by_text("62.2 %").wait_for(timeout=TIMEOUT)
+    target = vpd.vpd_leaf(22, 60, 21)                                   # transferred from the forward result
+    result(page).get_by_text("60.0 %").wait_for(timeout=TIMEOUT)
     set_number(page, "Air temperature (°C)", 30)
-    expected = f"{vpd.rh_for_air_vpd(30, 1.0):.1f} %"
+    expected = f"{vpd.rh_for_leaf_vpd(30, target, 29):.1f} %"
     result(page).get_by_text(expected).wait_for(timeout=TIMEOUT)
     page.get_by_text(share.MODE_A, exact=True).click()
-    expected = f"{vpd.vpd_air(30, 60):.2f} kPa"
+    expected = f"{target:.2f} kPa"                                        # RH transferred back
     result(page).get_by_text(expected).wait_for(timeout=TIMEOUT)
     assert num(page, "Air temperature (°C)").input_value().startswith("30")
 
@@ -141,13 +143,13 @@ def test_heatmap_controls(page):
     chart = page.locator('[data-testid="stPlotlyChart"]:visible').first
     chart.wait_for(timeout=TIMEOUT)
     page.get_by_text("Air VPD (kPa) as a function of temperature").first.wait_for(timeout=TIMEOUT)
-    page.get_by_text("Leaf VPD", exact=True).locator("visible=true").first.click()
-    page.get_by_text("Leaf VPD (kPa) as a function of temperature").first.wait_for(timeout=TIMEOUT)
+    page.get_by_text("Canopy VPD", exact=True).locator("visible=true").first.click()
+    page.get_by_text("Canopy VPD (kPa) as a function of temperature").first.wait_for(timeout=TIMEOUT)
     page.get_by_role("combobox", name="Colour scale").click()
     page.get_by_role("option", name="Viridis").click()
     chart.wait_for()
     set_number(page, "Min temperature (°C)", 12)
-    page.get_by_text("Leaf VPD (kPa) as a function of temperature").first.wait_for()
+    page.get_by_text("Canopy VPD (kPa) as a function of temperature").first.wait_for()
 
 
 @pytest.mark.exports
@@ -179,10 +181,10 @@ def test_download_heatmap_png_pdf_and_svg_via_matplotlib(page, artifacts_dir):
 @pytest.mark.exports
 def test_download_r_script_with_ggplot2_heatmap_and_reproduce(page, artifacts_dir):
     set_number(page, "Air temperature (°C)", 22.34)                         # precise decimal input
-    result(page).get_by_text(f"{vpd.vpd_air(22.34, 60):.2f} kPa").wait_for(timeout=TIMEOUT)
+    result(page).get_by_text(f"{vpd.vpd_leaf(22.34, 60, 21.34):.2f} kPa").wait_for(timeout=TIMEOUT)
     open_tab(page, "VPD Heatmap")
-    page.get_by_text("Leaf VPD", exact=True).locator("visible=true").first.click()
-    page.get_by_text("Leaf VPD (kPa) as a function of temperature").first.wait_for(timeout=TIMEOUT)
+    page.get_by_text("Canopy VPD", exact=True).locator("visible=true").first.click()
+    page.get_by_text("Canopy VPD (kPa) as a function of temperature").first.wait_for(timeout=TIMEOUT)
     path = download(page, "Download reproducible R script", artifacts_dir, "vpd_heatmap.R")
     text = path.read_text(encoding="utf-8")
     assert "es <- function(t) 0.6108 * exp(17.27 * t / (t + 237.3))" in text

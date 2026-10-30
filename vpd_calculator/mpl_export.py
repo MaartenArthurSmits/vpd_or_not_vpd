@@ -37,7 +37,7 @@ def heatmap_mpl(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0, colorsca
     temps = np.arange(t_min, t_max + 1e-9, 0.25)
     rhs = np.arange(rh_min, rh_max + 1e-9, 0.5)
     z = vpd.vpd_matrix(temps, rhs, kind, offset)
-    label = "Air VPD" if kind == vpd.AIR else "Leaf VPD"
+    label = "Air VPD" if kind == vpd.AIR else "Canopy VPD"
     vmin = float(np.floor(z.min() * 2) / 2) if z.min() < 0 else 0.0
     vmax = float(z_max) if z_max else float(z.max())
     tkind = kind if target_kind is None else target_kind

@@ -14,7 +14,7 @@ pytestmark = pytest.mark.unit
 
 # ---- share ---------------------------------------------------------------
 STATE = {"mode": share.MODE_B, "t_air": 25.5, "rh": 55.0, "target_vpd": 1.25,
-         "target_kind": share.LEAF_LABEL, "vpd_lo": 0.8, "vpd_hi": 1.2,
+         "vpd_lo": 0.8, "vpd_hi": 1.2,
          "interval_kind": share.AIR_LABEL, "calc_leaf_method": share.OFFSET_METHOD,
          "calc_offset": -1.5, "calc_leaf_meas": 24.0}
 

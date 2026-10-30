@@ -54,7 +54,7 @@ const RH_TOL = 1e-9, VPD_TOL = 1e-9;
 const k2 = (x) => x.toFixed(2).replace('-', '\u2212') + ' kPa';
 const f1 = (x) => x.toFixed(1);
 const signed1 = (x) => (x >= 0 ? '+' : '\u2212') + Math.abs(x).toFixed(1);
-const NAME = { air: 'Air VPD', leaf: 'Leaf VPD' };
+const NAME = { air: 'Air VPD', leaf: 'Canopy VPD' };
 
 export function compute(d, v) {
   const tAir = v.t_air;
@@ -64,28 +64,21 @@ export function compute(d, v) {
   if (d.mode === 'a') {
     out.rh = v.rh;
   } else {
-    // Two alternative air-RH settings for the same numeric target: as leaf VPD or as air VPD.
-    const mk = (kind) => {
-      const rh = kind === 'air' ? 100 * (1 - v.target_vpd / esA) : 100 * (esL - v.target_vpd) / esA;
-      const attainable = rh >= -RH_TOL && rh <= 100 + RH_TOL;
-      let message = '';
-      if (!attainable) {
-        const lo = kind === 'air' ? 0 : esL - esA, hi = kind === 'air' ? esA : esL;
-        message = rh > 100
-          ? `Unattainable: the target ${kind} VPD of ${k2(v.target_vpd)} is below the minimum reachable VPD (${k2(lo)} at 100% RH) for these temperatures (would need RH = ${f1(rh)}%).`
-          : `Unattainable: the target ${kind} VPD of ${k2(v.target_vpd)} exceeds the maximum reachable VPD (${k2(hi)} at 0% RH) for these temperatures (would need RH = ${f1(rh)}%).`;
-      }
-      return { rh, attainable, message };
-    };
-    out.alt = { air: mk('air'), leaf: mk('leaf') };
-    const main = out.alt[d.targetKind];
-    out.rh = main.rh; out.attainable = main.attainable; out.message = main.message;
+    // Reverse mode: the target is always canopy VPD (the representative leaf temperature sets e_s at the leaf).
+    out.rh = 100 * (esL - v.target_vpd) / esA;
+    out.attainable = out.rh >= -RH_TOL && out.rh <= 100 + RH_TOL;
+    if (!out.attainable) {
+      const lo = esL - esA, hi = esL;
+      out.message = out.rh > 100
+        ? `Unattainable: the target canopy VPD of ${k2(v.target_vpd)} is below the minimum reachable VPD (${k2(lo)} at 100% RH) for these temperatures (would need RH = ${f1(out.rh)}%).`
+        : `Unattainable: the target canopy VPD of ${k2(v.target_vpd)} exceeds the maximum reachable VPD (${k2(hi)} at 0% RH) for these temperatures (would need RH = ${f1(out.rh)}%).`;
+    }
   }
   out.ea = esA * out.rh / 100;
   out.air = esA - out.ea;
   out.leaf = esL - out.ea;
   if (out.attainable && out.leaf < 0) {
-    out.warnings.push(`Leaf VPD is negative (${k2(out.leaf)}): the air is supersaturated relative to the leaf surface, so condensation on the leaf is possible.`);
+    out.warnings.push(`Canopy VPD is negative (${k2(out.leaf)}): the air is supersaturated relative to the leaf surface, so condensation on the leaf is possible.`);
   }
   return out;
 }
@@ -120,7 +113,7 @@ function barHtml(s) {
     <div class="hint">Edit this target in the Acceptable range tab.</div>`;
 }
 
-// Forward mode: the bar shows leaf VPD (kPa); an air-VPD range is converted to leaf-VPD limits.
+// Forward mode: the bar shows canopy VPD (kPa); an air-VPD range is converted to canopy-VPD limits.
 function leafBar(r, t) {
   const shift = t.kind === 'air' ? r.esL - r.esA : 0;      // leaf VPD = air VPD + es(T_leaf) - es(T_air) at the same e_a
   const lo = t.lo + shift, hi = t.hi + shift;
@@ -128,14 +121,14 @@ function leafBar(r, t) {
   return barHtml({
     cur: r.leaf, lo, hi, point: t.lo === t.hi, pos: classify(r.leaf, lo, hi), unit: 'kPa', domain: [0, lo, hi, r.leaf, 2],
     bounds: lo === hi ? k2(lo) : `${kpa(lo)}\u2013${kpa(hi)} kPa`, axis: (x) => kpa(x),
-    context: `${t.period} target \u00b7 Leaf VPD`,
+    context: `${t.period} target \u00b7 Canopy VPD`,
     note: t.kind === 'air'
-      ? `Converted from the ${t.period.toLowerCase()} air-VPD range ${t.lo === t.hi ? k2(t.lo) : t.lo.toFixed(2) + '\u2013' + t.hi.toFixed(2) + ' kPa'} to leaf-VPD limits at the current air and leaf temperatures (${f1(r.tLeaf - r.offset)} / ${f1(r.tLeaf)} \u00b0C).`
+      ? `Converted from the ${t.period.toLowerCase()} air-VPD range ${t.lo === t.hi ? k2(t.lo) : t.lo.toFixed(2) + '\u2013' + t.hi.toFixed(2) + ' kPa'} to canopy-VPD limits at the current air and leaf temperatures (${f1(r.tLeaf - r.offset)} / ${f1(r.tLeaf)} \u00b0C).`
       : '',
   });
 }
 
-// Reverse mode: the bar shows required RH (%) against the RH interval of the acceptable VPD range.
+// Reverse mode: the bar shows canopy RH (%) against the RH interval of the acceptable VPD range.
 function rhBar(d, r, t) {
   const rhFor = (v) => t.kind === 'air' ? 100 * (1 - v / r.esA) : 100 * (r.esL - v) / r.esA;
   const rawLo = rhFor(t.hi), rawHi = rhFor(t.lo);          // higher VPD <-> lower RH
@@ -154,20 +147,15 @@ function rhBar(d, r, t) {
 }
 
 function reverseHtml(d, r, t) {
-  const main = d.targetKind, other = main === 'air' ? 'leaf' : 'air';
   const rhText = (x) => `${f1(x)} %`;
   let h = '';
   if (r.attainable) {
-    h += `<div class="big" data-testid="primary"><span class="lab">RH for ${main} VPD</span> \u2014 ${rhText(Math.min(Math.max(r.rh, 0), 100))}</div>`;
+    h += `<div class="big" data-testid="primary"><span class="lab">Canopy RH</span> \u2014 ${rhText(Math.min(Math.max(r.rh, 0), 100))}</div>`;
     h += t ? rhBar(d, r, t) : `<div class="hint">The acceptable range is invalid (lower limit above upper limit). Fix it in the Acceptable range tab.</div>`;
   } else {
     h += `<div class="err">${r.message}</div>`;
-    h += `<div class="big" data-testid="primary"><span class="lab">RH for ${main} VPD (not physically attainable)</span> \u2014 ${rhText(r.rh)}</div>`;
+    h += `<div class="big" data-testid="primary"><span class="lab">Canopy RH (not physically attainable)</span> \u2014 ${rhText(r.rh)}</div>`;
   }
-  const o = r.alt[other];
-  h += `<div class="second" data-testid="secondary">RH for ${other} VPD${o.attainable ? '' : ' (not physically attainable)'}: <b>${rhText(o.attainable ? Math.min(Math.max(o.rh, 0), 100) : o.rh)}</b></div>`;
-  if (!o.attainable) h += `<div class="err">${o.message}</div>`;
-  h += `<div class="hint">Alternative air-RH settings for the same target VPD, treated as leaf VPD or as air VPD at the current temperatures; not separate humidities inside and outside the leaf.</div>`;
   h += `<div class="cap">Leaf temperature used: ${f1(r.tLeaf)} \u00b0C (offset ${signed1(r.offset)} \u00b0C)</div>`;
   if (r.attainable) for (const w of r.warnings) h += `<div class="warn">${w}</div>`;
   return h;
@@ -177,7 +165,7 @@ export function resultsHtml(d, v) {
   const r = compute(d, v);
   const t = d.target;
   if (d.mode === 'b') return reverseHtml(d, r, t);
-  let h = `<div class="big" data-testid="primary"><span class="lab">Leaf VPD</span> \u2014 ${k2(r.leaf)}</div>`;
+  let h = `<div class="big" data-testid="primary"><span class="lab">Canopy VPD</span> \u2014 ${k2(r.leaf)}</div>`;
   if (t) {
     h += leafBar(r, t);
   } else {
@@ -196,6 +184,17 @@ export default function (component) {
   for (const old of Array.from(parentElement.children)) {   // a re-render must replace, not stack, the panel
     if (old.classList && old.classList.contains('vpd')) old.remove();
   }
+  // A rerun triggered by an earlier commit can arrive after a newer edit; keep the newer local values until
+  // Python's data has caught up (a changed input set, e.g. a mode switch, always takes Python's values).
+  const sig = d.inputs.map((f) => f.key).join(',');
+  for (const f of d.inputs) values[f.key] = f.value;
+  const pending = parentElement.__vpdPending;
+  if (pending && pending.sig === sig) {
+    if (d.inputs.every((f) => f.value === pending.values[f.key])) parentElement.__vpdPending = null;
+    else for (const f of d.inputs) values[f.key] = pending.values[f.key];
+  } else {
+    parentElement.__vpdPending = null;
+  }
   const root = document.createElement('div');
   root.className = 'vpd';
   const left = document.createElement('div');
@@ -205,10 +204,12 @@ export default function (component) {
   parentElement.appendChild(root);
 
   const refresh = () => { panel.innerHTML = '<h3>Results</h3>' + resultsHtml(d, values); };
-  const commit = () => setStateValue('values', { ...values });
+  const commit = () => {
+    parentElement.__vpdPending = { sig, values: { ...values } };   // newer than any rerun still in flight
+    setStateValue('values', { ...values });
+  };
 
   for (const f of d.inputs) {
-    values[f.key] = f.value;
     const box = document.createElement('div');
     box.className = 'field';
     const label = document.createElement('label');

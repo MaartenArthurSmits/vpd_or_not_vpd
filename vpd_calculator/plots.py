@@ -27,7 +27,7 @@ def heatmap_figure(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0,
     temps = np.arange(t_min, t_max + 1e-9, 0.25)
     rhs = np.arange(rh_min, rh_max + 1e-9, 0.5)
     z = vpd.vpd_matrix(temps, rhs, kind, offset)
-    label = "Air VPD" if kind == vpd.AIR else "Leaf VPD"
+    label = "Air VPD" if kind == vpd.AIR else "Canopy VPD"
     zmin = float(np.floor(z.min() * 2) / 2) if z.min() < 0 else 0.0
     zmax = float(z_max) if z_max else float(z.max())
     tkind = kind if target_kind is None else target_kind
@@ -86,7 +86,7 @@ def heatmap_figure(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0,
     def treatment_hover(m):
         return (f"<b>{m['name']}</b><br>Air {m['t_air']:.1f} °C, RH {m['rh']:.1f} %<br>"
                 f"Leaf offset {m['offset']:+.1f} °C, leaf {m['t_leaf']:.1f} °C<br>"
-                f"Air VPD {m['vpd_air']:.1f} kPa<br>Leaf VPD {m['vpd_leaf']:.1f} kPa")
+                f"Air VPD {m['vpd_air']:.1f} kPa<br>Canopy VPD {m['vpd_leaf']:.1f} kPa")
 
     # Treatments at exactly the selected point's coordinates (coordinates are never shifted).
     shared = [m for m in (treatments or []) if point_in_view
@@ -135,9 +135,9 @@ def vpd_vs_rh_figure(t_air, offset, kind, interval=None, rh_range=None, point_rh
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=rh, y=vpd.vpd_air(t_air, rh), name="Air VPD",
                              hovertemplate="RH %{x:.1f} %<br>%{y:.1f} kPa<extra>Air VPD</extra>"))
-    fig.add_trace(go.Scatter(x=rh, y=vpd.vpd_leaf(t_air, rh, t_air + offset), name="Leaf VPD",
+    fig.add_trace(go.Scatter(x=rh, y=vpd.vpd_leaf(t_air, rh, t_air + offset), name="Canopy VPD",
                              line=dict(dash="dash"),
-                             hovertemplate="RH %{x:.1f} %<br>%{y:.1f} kPa<extra>Leaf VPD</extra>"))
+                             hovertemplate="RH %{x:.1f} %<br>%{y:.1f} kPa<extra>Canopy VPD</extra>"))
     if rh_range and rh_range.get("attainable"):
         if rh_range["rh_min"] == rh_range["rh_max"]:        # single-value target: one line, no band
             fig.add_vline(x=rh_range["rh_min"], line_width=2, line_dash="dash", line_color="green",

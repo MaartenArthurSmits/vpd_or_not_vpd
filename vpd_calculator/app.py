@@ -55,7 +55,7 @@ st.markdown(
 # --------------------------------------------------------------------------
 DEFAULTS = {
     "t_air": 22.0, "rh": 60.0, "target_vpd": 1.0,
-    "calc_offset": 0.0, "calc_leaf_meas": 22.0,
+    "calc_offset": -1.0, "calc_leaf_meas": 22.0,
     "vpd_lo": 0.8, "vpd_hi": 1.2,            # legacy: kept so old links/setups load; the Calculator no longer uses them
     "dn_t_day": 22.0, "dn_t_night": 17.0,
     "dn_off_day": 0.0, "dn_off_night": 0.0,
@@ -80,7 +80,6 @@ if "_share_loaded" not in st.session_state:
     st.session_state.update(share.parse_params(st.query_params.to_dict()))
     derive_preset_state()
     st.session_state["_share_loaded"] = True
-st.session_state.setdefault("target_kind", share.LEAF_LABEL)      # default only when no (restored) choice exists
 
 
 def linked(label, key, lo, hi, step, fmt="%.1f", num_min=None, num_max=None, help=None, after=None):
@@ -154,7 +153,6 @@ LEAF_TABLE_CAPTION = (
 EQ_SATURATION = r"e_s(T)=0.6108\exp\left(\frac{17.27T}{T+237.3}\right)"
 EQ_FORWARD = r"VPD_{\mathrm{leaf}}=e_s(T_{\mathrm{leaf}})-e_s(T_{\mathrm{air}})\frac{RH}{100}"
 EQ_REVERSE_LEAF = r"RH=100\frac{e_s(T_{\mathrm{leaf}})-VPD_{\mathrm{target}}}{e_s(T_{\mathrm{air}})}"
-EQ_REVERSE_AIR = r"RH=100\left(1-\frac{VPD_{\mathrm{target}}}{e_s(T_{\mathrm{air}})}\right)"
 EQ_CAPTION = ("Temperature in °C; vapour pressure and VPD in kPa; RH in %. Saturation pressure: "
               "[FAO-56, Eq. 11](https://www.fao.org/4/x0490e/x0490e07.htm).")
 FIG4_CREDIT = (f"Figure: Nelson & Bugbee (2015), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), "
@@ -208,21 +206,36 @@ with tab_compare:
 # ==========================================================================
 with tab_calc:
     st.title("Vapour Pressure Deficit calculator")
-    mode = st.radio("Calculation mode", [share.MODE_A, share.MODE_B], key="mode", horizontal=True)
+    def sync_modes():
+        """Mode switch: carry the current result over so both modes describe the same conditions (full precision)."""
+        s = st.session_state
+        s.pop("_sync_note", None)
+        meas_in = s["calc_leaf_method"] == share.MEASURED_METHOD
+        off_ = s["calc_leaf_meas"] - s["t_air"] if meas_in else s["calc_offset"]
+        meas_ = s["calc_leaf_meas"] if meas_in else None
+        if s["mode"] == share.MODE_B:                                     # VPD -> RH: current canopy VPD becomes the target
+            v = vpd.calculate_vpd(s["t_air"], s["rh"], off_, meas_).vpd_leaf
+            if -5.0 <= v <= 10.0:
+                s["target_vpd"] = v
+            else:
+                s["_sync_note"] = "The calculated canopy VPD is outside the target-VPD input range, so it was not transferred."
+        else:                                                              # RH -> VPD: current canopy RH becomes the RH input
+            res = vpd.calculate_required_rh(s["t_air"], s["target_vpd"], vpd.LEAF, off_, meas_)
+            if res.attainable:
+                s["rh"] = min(max(res.rh, 0.0), 100.0)                    # only float-tolerance clipping
+            else:
+                s["_sync_note"] = "The calculated canopy RH is not attainable, so it was not transferred to the RH input."
+
+    mode = st.radio("Calculation mode", [share.MODE_A, share.MODE_B], key="mode", horizontal=True,
+                    on_change=sync_modes)
+    if st.session_state.get("_sync_note"):
+        st.info(st.session_state["_sync_note"])
     mode_a = mode == share.MODE_A
 
-    o1, o2, o3 = st.columns(3, gap="large")
+    o1, o3 = st.columns(2, gap="large")
     with o1:
         leaf_method = st.radio("Leaf temperature input", [share.OFFSET_METHOD, share.MEASURED_METHOD],
                                key="calc_leaf_method", horizontal=True)
-    with o2:
-        if not mode_a:
-            def set_target_kind():
-                st.session_state["target_kind"] = st.session_state["target_kind__w"]
-            st.session_state["target_kind__w"] = st.session_state["target_kind"]   # widget key is dropped while hidden
-            st.radio("Target VPD refers to", [share.LEAF_LABEL, share.AIR_LABEL], key="target_kind__w",
-                     on_change=set_target_kind, horizontal=True)
-    kind_label = st.session_state["target_kind"]
     with o3:
         period = st.radio("Compare with Acceptable range", ["Day", "Night"], key="calc_period", horizontal=True)
 
@@ -258,7 +271,6 @@ with tab_calc:
 
     live_calculator.live_calculator(
         {"mode": "a" if mode_a else "b", "leafMethod": "measured" if measured_in else "offset",
-         "targetKind": "air" if mode_a or kind_label == share.AIR_LABEL else "leaf",
          "target": {"lo": lo, "hi": hi, "kind": ikind, "period": period} if interval_ok else None,
          "inputs": live_inputs},
         commit_live_values)
@@ -270,8 +282,7 @@ with tab_calc:
     if mode_a:
         current_rh = st.session_state["rh"]
     else:
-        res = vpd.calculate_required_rh(t_air, st.session_state["target_vpd"], kind_from_label(kind_label),
-                                        offset, measured)
+        res = vpd.calculate_required_rh(t_air, st.session_state["target_vpd"], vpd.LEAF, offset, measured)
         current_rh = min(max(res.rh, 0.0), 100.0) if res.attainable else None   # only tiny float-tolerance clipping
 
     es_air, es_leaf = (float(vpd.saturation_vapour_pressure(x)) for x in (t_air, offset + t_air))
@@ -283,8 +294,9 @@ with tab_calc:
             rh_used = st.session_state["rh"] if mode_a else res.rh
             d2.markdown(f"Actual vapour pressure  \n**{es_air * rh_used / 100:.2f} kPa**")
         st.latex(EQ_SATURATION)
-        st.latex(EQ_FORWARD if mode_a else EQ_REVERSE_AIR if kind_label == share.AIR_LABEL else EQ_REVERSE_LEAF)
+        st.latex(EQ_FORWARD if mode_a else EQ_REVERSE_LEAF)
         st.caption(EQ_CAPTION)
+        st.caption("Canopy VPD uses the representative leaf temperature; canopy RH is the surrounding air’s relative humidity.")
 
     with st.expander("Leaf-temperature guidance"):
         st.markdown(LEAF_GUIDANCE)
@@ -341,7 +353,7 @@ with tab_daynight:
                              after=range_edited)
                 dhi = linked(f"{period} upper limit (kPa)", f"dn_hi_{p}", 0.0, 4.0, 0.1, num_max=10.0,
                              after=range_edited)
-                dkind = kind_from_label(st.radio(f"{period} range applies to", ["Air VPD", "Leaf VPD"],
+                dkind = kind_from_label(st.radio(f"{period} range applies to", [share.AIR_LABEL, share.LEAF_LABEL],
                                                  key=f"dn_kind_{p}", horizontal=True))
             if dlo > dhi:
                 st.error(f"{period}: lower limit must not exceed the upper limit.")
@@ -394,7 +406,7 @@ with tab_heat:
     rh_max = h4.number_input("Max RH (%)", value=100.0, min_value=1.0, max_value=100.0, step=5.0,
                              format="%.1f", key="hm_rhmax")
     g1, g2, g3, g4 = st.columns(4)
-    hm_kind_label = g1.radio("VPD type", ["Air VPD", "Leaf VPD"], key="hm_kind", horizontal=True)
+    hm_kind_label = g1.radio("VPD type", [share.AIR_LABEL, share.LEAF_LABEL], key="hm_kind", horizontal=True)
     cscale = g2.selectbox("Colour scale", plots.COLORSCALES, key="hm_cs")
     cstep = g3.selectbox("Contour spacing (kPa)", [0.1, 0.2, 0.5, 1.0], index=2, key="hm_step")
     zmax_in = g4.number_input("Colour scale max (kPa, 0 = auto)", min_value=0.0, value=0.0, step=0.5,
@@ -415,7 +427,7 @@ with tab_heat:
         tg = (lo, hi) if (show_target and interval_ok) else None
         if hm_kind == vpd.LEAF or (tg is not None and ikind == vpd.LEAF):      # leaf VPD is used by the chart
             sign = "−" if offset < 0 else "+"
-            note = (f"Leaf VPD here assumes one constant leaf–air offset of {offset:+.1f} °C: leaf temperature = "
+            note = (f"Canopy VPD here assumes one constant leaf–air offset of {offset:+.1f} °C: leaf temperature = "
                     f"air temperature {sign} {abs(offset):.1f} °C throughout this chart.")
             if measured is not None:
                 note += (f" The offset is derived from the measured leaf temperature ({measured:.1f} °C) and the "
@@ -433,10 +445,10 @@ with tab_heat:
         leaf_in_chart = hm_kind == vpd.LEAF or (tg is not None and ikind == vpd.LEAF)
         if leaf_in_chart and any(abs(m["offset"] - offset) > 1e-9 for m in markers):
             st.caption(f"Marker values use each treatment's own leaf offset; the chart background uses the "
-                       f"Calculator's offset ({offset:+.1f} °C), so a marker's leaf VPD can differ from the "
+                       f"Calculator's offset ({offset:+.1f} °C), so a marker's canopy VPD can differ from the "
                        "background colour at its position.")
         if any(trace.name == vpd.ZERO_LABEL for trace in fig.data):
-            st.caption("Negative leaf VPD (beyond the saturation line) indicates possible condensation.")
+            st.caption("Negative canopy VPD (beyond the saturation line) indicates possible condensation.")
         if tg:
             if vpd.is_point_target(lo, hi):
                 st.caption(f"Dashed contour: user-defined single-value target **{ikind} VPD** "
@@ -457,7 +469,7 @@ with tab_heat:
         leaf_t = measured if measured is not None else t_air + offset
         r_code = rscript.build_r_script(
             mode_a, t_air, st.session_state["rh"], st.session_state["target_vpd"],
-            kind_from_label(st.session_state.get("target_kind", "Air VPD")), leaf_t,
+            vpd.LEAF, leaf_t,
             (lo, hi) if interval_ok else None, ikind, heatmap=hm_params)
         d3.download_button("Download reproducible R script", r_code.encode("utf-8"),
                            "vpd_heatmap.R", "text/plain", key="dl_rscript",

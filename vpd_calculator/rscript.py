@@ -61,9 +61,9 @@ def _heatmap_block(h: dict) -> list:
     start = float(np.ceil(z.min() / step) * step)
     if start - z.min() < 1e-9:      # a contour on the data minimum is only an edge artefact
         start += step
-    label = "Air VPD" if kind == vpd.AIR else "Leaf VPD"
+    label = "Air VPD" if kind == vpd.AIR else "Canopy VPD"
     tkind = h.get("target_kind") or kind          # colours follow `kind`, the target follows `target_kind`
-    tlabel = "Air VPD" if tkind == vpd.AIR else "Leaf VPD"
+    tlabel = "Air VPD" if tkind == vpd.AIR else "Canopy VPD"
     treatment_note = ""
     leaf_in_chart = kind == vpd.LEAF or (h.get("target") is not None and tkind == vpd.LEAF)
     if h.get("treatments"):

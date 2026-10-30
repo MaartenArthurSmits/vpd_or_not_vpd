@@ -14,11 +14,11 @@ import presets
 
 APP_URL = "https://vpd-or-not-vpd.streamlit.app/"
 
-MODE_A = "Calculate VPD (from temperature and RH)"
-MODE_B = "Calculate RH (from target VPD)"
+MODE_A = "Calculate VPD (from RH)"
+MODE_B = "Calculate RH (from VPD)"
 OFFSET_METHOD = "Offset from air"
 MEASURED_METHOD = "Measured leaf temperature"
-AIR_LABEL, LEAF_LABEL = "Air VPD", "Leaf VPD"
+AIR_LABEL, LEAF_LABEL = "Air VPD", "Canopy VPD"      # LEAF_LABEL: display name of the leaf-temperature-based VPD
 
 # query key -> (session-state key, min, max)
 _NUMERIC = {
@@ -74,8 +74,7 @@ def parse_params(params: Mapping[str, str]) -> dict:
                 out[key] = v
     if params.get("m") in ("a", "b"):
         out["mode"] = MODE_A if params["m"] == "a" else MODE_B
-    if params.get("k") in _KIND:
-        out["target_kind"] = _KIND[params["k"]]
+    # "k" (reverse target basis) from older links is ignored: the reverse target is always canopy VPD.
     if params.get("ik") in _KIND:
         out["interval_kind"] = _KIND[params["ik"]]
     if params.get("hk") in _KIND:
@@ -126,7 +125,6 @@ def build_params(state: Mapping) -> dict:
         "t": _fmt(state["t_air"]),
         "rh": _fmt(state["rh"]),
         "tv": _fmt(state["target_vpd"]),
-        "k": "air" if state.get("target_kind", AIR_LABEL) == AIR_LABEL else "leaf",
         "lo": _fmt(state["vpd_lo"]),
         "hi": _fmt(state["vpd_hi"]),
         "ik": "air" if state.get("interval_kind", AIR_LABEL) == AIR_LABEL else "leaf",

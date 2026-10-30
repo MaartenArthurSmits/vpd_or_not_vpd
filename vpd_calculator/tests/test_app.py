@@ -62,7 +62,7 @@ def test_default_run_has_no_exceptions_and_known_values():
     at = new_app().run()
     assert not at.exception
     assert at.radio(key="mode").value == share.MODE_A
-    assert live_values(at) == {"t_air": 22.0, "rh": 60.0, "calc_offset": 0.0}
+    assert live_values(at) == {"rh": 60.0, "t_air": 22.0, "calc_offset": -1.0}      # fresh default offset
     assert live(at)["target"] == {"lo": 0.8, "hi": 1.2, "kind": "air", "period": "Day"}
 
 
@@ -106,11 +106,12 @@ def test_interface_values_use_one_decimal_place():
     assert all(ONE_DECIMAL.match(m.value) for m in at.metric), [m.value for m in at.metric]
 
 
-def test_switch_to_required_rh_mode_matches_spec_example():
+def test_switch_to_rh_mode_transfers_the_current_canopy_vpd():
     at = new_app().run()
     at.radio(key="mode").set_value(share.MODE_B).run()
-    assert not at.exception
-    assert live(at)["mode"] == "b" and live_values(at) == {"t_air": 22.0, "target_vpd": 1.0, "calc_offset": 0.0}
+    assert not at.exception and live(at)["mode"] == "b"
+    assert at.session_state["target_vpd"] == vpd.calculate_vpd(22.0, 60.0, -1.0).vpd_leaf       # full precision
+    assert list(live_values(at)) == ["target_vpd", "t_air", "calc_offset"]                         # input order
 
 
 def test_temperature_preserved_across_modes():
@@ -134,7 +135,7 @@ def test_edit_temperature_and_rh_forward():
     set_num(at, "t_air", 25.0)
     set_num(at, "rh", 40.5)
     assert not at.exception
-    assert live_values(at) == {"t_air": 25.0, "rh": 40.5, "calc_offset": 0.0}
+    assert live_values(at) == {"rh": 40.5, "t_air": 25.0, "calc_offset": -1.0}
 
 
 def test_edit_target_vpd_reverse():
@@ -177,40 +178,41 @@ def test_leaf_temperature_guidance_replaces_scenario_text():
     assert image.proto.imgs[0].caption.startswith("Fig. 4. Calculated effects of environmental conditions")
 
 
-def test_target_leaf_vpd_with_offset():
+def test_reverse_mode_has_no_target_basis_selector_and_is_canopy_only():
     at = new_app().run()
     at.radio(key="mode").set_value(share.MODE_B).run()
-    at.radio(key="target_kind__w").set_value(share.LEAF_LABEL).run()
+    assert not any(r.label == "Target VPD refers to" for r in at.radio) and "targetKind" not in live(at)
     set_num(at, "calc_offset", -2.0)
-    assert live(at)["targetKind"] == "leaf" and live_values(at)["calc_offset"] == -2.0
+    assert live_values(at)["calc_offset"] == -2.0
 
 
-def test_reverse_target_defaults_to_leaf_and_modes_preserve_inputs():
+def test_older_link_with_air_target_selection_is_still_canopy_only():
+    at = app_with_params({"m": "b", "k": "air"})
+    assert not at.exception and "targetKind" not in live(at) and "target_kind" not in at.session_state
+
+
+def test_mode_switch_transfers_values_at_full_precision_without_drift():
     at = new_app().run()
     at.radio(key="mode").set_value(share.MODE_B).run()
-    assert at.radio(key="target_kind__w").value == share.LEAF_LABEL
-    assert at.radio(key="target_kind__w").options == [share.LEAF_LABEL, share.AIR_LABEL]
-    set_num(at, "t_air", 27.5)
-    set_num(at, "rh", 45.0)
-    set_num(at, "calc_offset", -1.5)
-    set_num(at, "calc_leaf_meas", 25.0)
-    set_num(at, "target_vpd", 1.3)
-    at.radio(key="target_kind__w").set_value(share.AIR_LABEL).run()
-    at.radio(key="calc_leaf_method").set_value(share.MEASURED_METHOD).run()
-    at.radio(key="calc_period").set_value("Night").run()
-    at.radio(key="mode").set_value(share.MODE_A).run()                           # target radio is not rendered here
-    assert live_values(at) == {"t_air": 27.5, "rh": 45.0, "calc_leaf_meas": 25.0}
+    set_num(at, "target_vpd", 1.2)
+    at.radio(key="mode").set_value(share.MODE_A).run()
+    rh = at.session_state["rh"]
+    assert rh == pytest.approx(vpd.rh_for_leaf_vpd(22.0, 1.2, 21.0), abs=1e-12)
+    assert vpd.calculate_vpd(22.0, rh, -1.0).vpd_leaf == pytest.approx(1.2, abs=1e-12)
+    set_num(at, "rh", 88.0)
     at.radio(key="mode").set_value(share.MODE_B).run()
-    assert at.radio(key="target_kind__w").value == share.AIR_LABEL               # explicit choice survives
-    assert live_values(at) == {"t_air": 27.5, "target_vpd": 1.3, "calc_leaf_meas": 25.0}
-    assert at.radio(key="calc_period").value == "Night"
-    at.radio(key="calc_leaf_method").set_value(share.OFFSET_METHOD).run()
-    assert live_values(at)["calc_offset"] == -1.5 and at.session_state["rh"] == 45.0
-
-
-def test_restored_air_target_choice_is_respected():
-    at = app_with_params({"m": "b", "k": "air"})
-    assert at.radio(key="target_kind__w").value == share.AIR_LABEL
+    tv = at.session_state["target_vpd"]
+    assert vpd.calculate_required_rh(22.0, tv, vpd.LEAF, -1.0).rh == pytest.approx(88.0, abs=1e-9)
+    for _ in range(3):                                                          # repeated switching does not drift
+        at.radio(key="mode").set_value(share.MODE_A).run()
+        at.radio(key="mode").set_value(share.MODE_B).run()
+    assert at.session_state["target_vpd"] == pytest.approx(tv, abs=1e-12) and at.session_state["rh"] == pytest.approx(88.0, abs=1e-9)
+    at.radio(key="calc_leaf_method").set_value(share.MEASURED_METHOD).run()
+    set_num(at, "calc_leaf_meas", 25.0)
+    set_num(at, "t_air", 27.5)
+    at.radio(key="mode").set_value(share.MODE_A).run()
+    assert set(live_values(at)) == {"rh", "t_air", "calc_leaf_meas"} and at.session_state["calc_offset"] == -1.0
+    assert at.session_state["rh"] == pytest.approx(vpd.calculate_required_rh(27.5, tv, vpd.LEAF, 0.0, 25.0).rh, abs=1e-9)
 
 
 # ---- acceptable range replaces the Calculator's own target range -----------------------------------
@@ -315,10 +317,10 @@ def test_legacy_share_url_still_works_and_selects_matching_preset():
     at.run()
     assert not at.exception
     s = at.session_state
-    assert (s["t_air"], s["target_vpd"], s["target_kind"], s["interval_kind"], s["calc_offset"]) == (
-        25.0, 1.1, share.LEAF_LABEL, share.LEAF_LABEL, -2.0)
+    assert (s["t_air"], s["target_vpd"], s["interval_kind"], s["calc_offset"]) == (
+        25.0, 1.1, share.LEAF_LABEL, -2.0)
     assert (s["vpd_lo"], s["vpd_hi"]) == (1.2, 1.5)                  # legacy settings still load (no longer used)
-    assert live(at)["mode"] == "b" and live(at)["targetKind"] == "leaf"
+    assert live(at)["mode"] == "b"
     assert live_values(at) == {"t_air": 25.0, "target_vpd": 1.1, "calc_offset": -2.0}
 
 
@@ -340,7 +342,7 @@ def test_query_params_follow_state():
 # ---- heatmap and methods tabs ---------------------------------------------------------------------------
 def test_heatmap_tab_controls_and_validation():
     at = new_app().run()
-    at.radio(key="hm_kind").set_value("Leaf VPD").run()
+    at.radio(key="hm_kind").set_value("Canopy VPD").run()
     at.selectbox(key="hm_cs").set_value("Viridis").run()
     at.number_input(key="hm_tmin").set_value(35.0).run()
     assert not at.exception
@@ -551,8 +553,8 @@ def test_day_night_link_restores_controls_and_rh_results_in_fresh_session():
     n = metric_starting(at, "Night RH range for air VPD 0.6-1.0 kPa at 17.0 °C")
     assert n.value == f"{rh_lo:.1f} - {rh_hi:.1f} %"
     # the main calculator is untouched
-    assert (s["t_air"], s["rh"], s["vpd_lo"], s["vpd_hi"], s["calc_offset"]) == (22.0, 60.0, 0.8, 1.2, 0.0)
-    assert live_values(at) == {"t_air": 22.0, "rh": 60.0, "calc_offset": 0.0}
+    assert (s["t_air"], s["rh"], s["vpd_lo"], s["vpd_hi"], s["calc_offset"]) == (22.0, 60.0, 0.8, 1.2, -1.0)
+    assert live_values(at) == {"rh": 60.0, "t_air": 22.0, "calc_offset": -1.0}
 
 
 def test_share_link_restores_preset_identity_and_custom_status():
@@ -685,9 +687,9 @@ def test_heatmap_link_restores_controls_and_chart_alongside_other_settings():
     spec = heatmap_spec(at)
     layout = spec["layout"]
     assert layout["xaxis"]["range"] == [12, 38] and layout["yaxis"]["range"] == [25, 95]
-    assert "Leaf VPD" in layout["title"]["text"]
+    assert "Canopy VPD" in layout["title"]["text"]
     heat = spec["data"][0]
-    assert heat["zmax"] == 3.5 and heat["colorbar"]["title"]["text"] == "Leaf VPD (kPa)"
+    assert heat["zmax"] == 3.5 and heat["colorbar"]["title"]["text"] == "Canopy VPD (kPa)"
     assert heat["colorscale"][0][1] == "#440154"                                   # Viridis
     # no target layers or point; the extra contour is the leaf VPD = 0 line (-2 degC offset crosses the chart)
     assert [d["type"] for d in spec["data"]] == ["heatmap", "contour", "contour"]
@@ -847,14 +849,14 @@ def test_heatmap_svg_download_is_offered_with_png_and_pdf_and_follows_the_settin
     assert (calls["Download SVG"]["file_name"], calls["Download SVG"]["mime"]) == ("vpd_heatmap.svg", "image/svg+xml")
     svg = calls["Download SVG"]["data"]
     assert svg[:5] == b"<?xml" and b"<svg" in svg and b"<image" in svg      # raster colour layer
-    assert b"Air VPD" in svg and b"Leaf VPD" not in svg
+    assert b"Air VPD" in svg and b"Canopy VPD" not in svg
     assert calls["Download PNG"]["data"][:8] == b"\x89PNG\r\n\x1a\n" and calls["Download PDF"]["data"][:5] == b"%PDF-"
     at.run()                                                                # unchanged settings keep the downloads
     assert heatmap_downloads(at) == {"Download PNG", "Download PDF", "Download SVG"}
     at.radio(key="hm_kind").set_value(share.LEAF_LABEL).run()               # changed settings hide the old ones
     assert heatmap_downloads(at) == set()
     at.button(key="png_prepare").click().run()
-    assert b"Leaf VPD" in calls["Download SVG"]["data"] and heatmap_downloads(at)
+    assert b"Canopy VPD" in calls["Download SVG"]["data"] and heatmap_downloads(at)
 
 
 def test_older_cached_heatmap_export_without_svg_is_ignored_without_error():
@@ -954,6 +956,7 @@ def heatmap_captions(at):
 
 def test_treatment_markers_toggle_hover_explanation_and_edits(monkeypatch):
     at = new_app().run()
+    set_num(at, "calc_offset", 0.0)                                                    # explicit 0 offset (default is -1.0)
     assert at.checkbox(key="hm_treatments").value is False and treatment_trace(at) == []
     assert "PNG/PDF/SVG downloads and the R script" in heatmap_captions(at)
     at.session_state["cmp_editor"] = {
@@ -969,7 +972,7 @@ def test_treatment_markers_toggle_hover_explanation_and_edits(monkeypatch):
     assert trace["x"] == [22.0, 33.0] and trace["y"] == [60.0, 60.0]                    # Far (outside) and Broken skipped
     assert trace["text"] == ["Example A (22 °C, 60 % RH)", "Example B (33 °C, 60 % RH)"]
     a, b = trace["hovertext"]
-    assert "Leaf offset -2.0 °C, leaf 20.0 °C" in a and f"Leaf VPD {vpd.vpd_leaf(22, 60, 20):.1f} kPa" in a
+    assert "Leaf offset -2.0 °C, leaf 20.0 °C" in a and f"Canopy VPD {vpd.vpd_leaf(22, 60, 20):.1f} kPa" in a
     assert "Leaf offset +1.0 °C, leaf 34.0 °C" in b and f"Air VPD {vpd.vpd_air(33, 60):.1f} kPa" in b
     text = heatmap_captions(at)
     assert "1 calculated treatment is outside the displayed axes" in text

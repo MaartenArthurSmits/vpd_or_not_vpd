@@ -145,7 +145,7 @@ def test_plotly_target_follows_target_kind_on_both_heatmaps(hm_kind, target_kind
     # dashed contours are drawn on the target-kind field
     expected_target = vpd.vpd_air(T_AIR, RH) if target_kind == vpd.AIR else vpd.vpd_leaf(T_AIR, RH, T_AIR + OFFSET)
     assert target_contour.z[i][j] == pytest.approx(expected_target, abs=1e-9)
-    assert "Air VPD" in target_contour.name if target_kind == vpd.AIR else "Leaf VPD" in target_contour.name
+    assert "Air VPD" in target_contour.name if target_kind == vpd.AIR else "Canopy VPD" in target_contour.name
 
 
 @pytest.mark.parametrize("target_kind", BOTH)
@@ -180,7 +180,7 @@ def test_mpl_target_follows_target_kind_on_both_heatmaps(hm_kind, target_kind, i
     filled, _ = _mpl_target_artists(fig)
     assert any(p.contains_point((T_AIR, RH)) for p in filled.get_paths()) is inside
     legend_text = [t.get_text() for t in fig.axes[0].get_legend().get_texts()]
-    label = "Air VPD" if target_kind == vpd.AIR else "Leaf VPD"
+    label = "Air VPD" if target_kind == vpd.AIR else "Canopy VPD"
     assert any(f"Target {label} 0.8-1.2 kPa" in t for t in legend_text)
 
 
@@ -208,7 +208,7 @@ POINT = (1.0, 1.0)
 
 def test_target_label_helper_single_value_and_range():
     assert vpd.target_label(vpd.AIR, 1.0, 1.0) == "Target Air VPD 1.0 kPa"
-    assert vpd.target_label(vpd.LEAF, 1.0, 1.0) == "Target Leaf VPD 1.0 kPa"
+    assert vpd.target_label(vpd.LEAF, 1.0, 1.0) == "Target Canopy VPD 1.0 kPa"
     assert vpd.target_label(vpd.AIR, 0.8, 1.2) == "Target Air VPD 0.8-1.2 kPa"
     assert vpd.is_point_target(1.0, 1.0) and not vpd.is_point_target(0.8, 1.2)
     assert [vpd.classify_wording(p) for p in ("below", "inside", "above")] == [
@@ -216,7 +216,7 @@ def test_target_label_helper_single_value_and_range():
 
 
 @pytest.mark.parametrize("target_kind,label", [(vpd.AIR, "Target Air VPD 1.0 kPa"),
-                                                (vpd.LEAF, "Target Leaf VPD 1.0 kPa")])
+                                                (vpd.LEAF, "Target Canopy VPD 1.0 kPa")])
 def test_plotly_single_target_has_one_contour_and_no_band(target_kind, label):
     fig = plots.heatmap_figure(10, 40, 20, 100, vpd.AIR, OFFSET, point=(T_AIR, RH), target=POINT,
                                target_kind=target_kind)
@@ -241,7 +241,7 @@ def test_plotly_single_target_contour_is_drawn_at_the_value():
 
 
 @pytest.mark.parametrize("target_kind,label", [(vpd.AIR, "Target Air VPD 1.0 kPa"),
-                                                (vpd.LEAF, "Target Leaf VPD 1.0 kPa")])
+                                                (vpd.LEAF, "Target Canopy VPD 1.0 kPa")])
 def test_mpl_single_target_is_one_contour_without_filled_band(target_kind, label):
     fig = mpl_export.heatmap_mpl(10, 40, 10, 100, vpd.AIR, OFFSET, point=(T_AIR, RH), target=POINT,
                                  target_kind=target_kind)
@@ -314,7 +314,7 @@ def test_treatment_markers_are_labelled_distinct_from_the_star_and_show_their_ow
     assert trace.marker.symbol == "diamond" and star.marker.symbol == "star" and trace.marker.color != star.marker.color
     hover = trace.hovertext[0]
     for part in ("Cool", "Air 22.0 °C, RH 60.0 %", "Leaf offset -2.0 °C, leaf 20.0 °C",
-                 f"Air VPD {vpd.vpd_air(22, 60):.1f} kPa", f"Leaf VPD {vpd.vpd_leaf(22, 60, 20):.1f} kPa"):
+                 f"Air VPD {vpd.vpd_air(22, 60):.1f} kPa", f"Canopy VPD {vpd.vpd_leaf(22, 60, 20):.1f} kPa"):
         assert part in hover
     # the existing layers are untouched and the star stays on top
     assert [type(t).__name__ for t in fig.data][:-2] == [type(t).__name__ for t in base.data][:-1]
@@ -336,7 +336,7 @@ def test_coincident_treatment_and_selected_point_stay_identifiable():
     assert trace.marker.size[0] > star.marker.size > 0 and trace.marker.size[1] < trace.marker.size[0]
     assert trace.textposition == ("bottom right", "top center")
     for part in ("Selected", "Comparison treatment at this point", "<b>Cool</b>",
-                 "Leaf offset -2.0 °C, leaf 20.0 °C", f"Leaf VPD {vpd.vpd_leaf(22, 60, 20):.1f} kPa"):
+                 "Leaf offset -2.0 °C, leaf 20.0 °C", f"Canopy VPD {vpd.vpd_leaf(22, 60, 20):.1f} kPa"):
         assert part in star.hovertemplate
     assert "Warm" not in star.hovertemplate and "Cool" in trace.hovertext[0] and "Warm" in trace.hovertext[1]
 

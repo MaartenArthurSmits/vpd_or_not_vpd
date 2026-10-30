@@ -217,7 +217,7 @@ def is_point_target(low: float, high: float) -> bool:
 
 def target_label(kind: str, low: float, high: float) -> str:
     """Legend/plot label for a target: 'Target Air VPD 1.0 kPa' or 'Target Air VPD 0.8-1.2 kPa'."""
-    name = "Air VPD" if kind == AIR else "Leaf VPD"
+    name = "Air VPD" if kind == AIR else "Canopy VPD"
     if is_point_target(low, high):
         return f"Target {name} {low:.1f} kPa"
     return f"Target {name} {low:.1f}-{high:.1f} kPa"
