@@ -18,6 +18,7 @@ REPO = ROOT.parent
 EXPECTED = {
     "General established plants — Lopez et al. (2026)": (0.70, 1.30),
     "General established plants — Runkle (2021)": (0.70, 1.50),
+    "Propagation, roots developing — Lopez et al. (2026)": (0.30, 0.70),
     "Propagation, roots developing — Runkle (2021)": (0.30, 0.70),
     "Leafy greens and herbs, vegetative — ASHRAE (2023)": (0.65, 0.90),
     "Flowering and fruiting, indoor crops — ASHRAE (2023)": (1.00, 1.40),
@@ -40,8 +41,8 @@ def test_preset_matching_and_custom_fallback():
 
 
 def test_adaptation_statement_is_explicit_and_sources_are_in_the_references():
-    assert "leaf temperature equals air temperature" in presets.ABOUT_RANGES and "validated these ranges as canopy-VPD optima" in presets.ABOUT_RANGES
-    assert "limits then remain fixed" in presets.ABOUT_RANGES
+    assert "assumes air and canopy VPD are identical" in presets.ABOUT_RANGES
+    assert "remains fixed regardless of leaf temperature inputs" in presets.ABOUT_RANGES and presets.ABOUT_RANGES.count("\n\n") == 1
     app = (ROOT / "app.py").read_text(encoding="utf-8")
     for needle in ("Yamanaka, R.", "Lopez, R.", "Runkle, E. S. (2021", "Runkle, E. S. (2022", "Wollaeger, H.", "ASHRAE. (2023)", "Bayer. (2020"):
         assert needle in app, needle

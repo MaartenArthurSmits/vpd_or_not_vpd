@@ -10,45 +10,78 @@ CUSTOM = "Custom range"
 
 _RUNKLE_URL = "https://www.canr.msu.edu/floriculture/uploads/files/Water%20VPD.pdf"
 _ASHRAE_URL = "https://handbook.ashrae.org/Handbooks/A23/SI/A23_Ch25/a23_ch25_si.aspx"
-# (display name, share id, lower kPa, upper kPa, source note in markdown)
+_LOPEZ_URL = "https://www.inside-grower.com/Article/?articleid=28096"
+_BAYER_URL = ("https://www.vegetables.bayer.com/ca/en-ca/resources/growing-tips/cultivation-insights/"
+              "fruit-length-in-winter-grown-cucumbers.html")
+_YAMANAKA_URL = "https://doi.org/10.2503/hortj.SZD-015"
+# (internal name, share id, lower kPa, upper kPa, short label, citation text, citation URL, detailed source note)
 _PRESETS = [
-    ("General established plants — Lopez et al. (2026)", "lopez", 0.70, 1.30,
-     "[Lopez, Chen, Cooley & Vander Weide, *VPD, Temperature & Everbearing Strawberries*]"
-     "(https://www.inside-grower.com/Article/?articleid=28096), “Greenhouse VPD ranges.” Original VPD basis: not confirmed."),
-    ("General established plants — Runkle (2021)", "runkle-mod", 0.70, 1.50,
+    ("General established plants — Lopez et al. (2026)", "lopez", 0.70, 1.30, "Established plants",
+     "Lopez et al. (2026)", _LOPEZ_URL,
+     f"[Lopez, Chen, Cooley & Vander Weide, *VPD, Temperature & Everbearing Strawberries*]({_LOPEZ_URL}), "
+     "“Greenhouse VPD ranges.” Original VPD basis: not confirmed."),
+    ("General established plants — Runkle (2021)", "runkle-mod", 0.70, 1.50, "Established plants",
+     "Runkle (2021)", _RUNKLE_URL,
      f"[Runkle, *Water Vapor-Pressure Deficit*]({_RUNKLE_URL}), *Greenhouse Product News*, December 2021, p. 34, "
      "“Moderate VPD” (a subjective classification). Original VPD basis: not confirmed."),
-    ("Propagation, roots developing — Runkle (2021)", "runkle-low", 0.30, 0.70,
+    ("Propagation, roots developing — Lopez et al. (2026)", "lopez-prop", 0.30, 0.70, "Propagation",
+     "Lopez et al. (2026)", _LOPEZ_URL,
+     f"[Lopez, Chen, Cooley & Vander Weide, *VPD, Temperature & Everbearing Strawberries*]({_LOPEZ_URL}), "
+     "“Mid to Late Propagation Stages—Low VPD” (propagation after roots begin developing). "
+     "Original VPD basis: not confirmed."),
+    ("Propagation, roots developing — Runkle (2021)", "runkle-low", 0.30, 0.70, "Propagation",
+     "Runkle (2021)", _RUNKLE_URL,
      f"Same [Runkle article]({_RUNKLE_URL}), “Low VPD” (a subjective classification); applies after an initial "
      "root system develops. Original VPD basis: not confirmed."),
-    ("Leafy greens and herbs, vegetative — ASHRAE (2023)", "ashrae-leafy", 0.65, 0.90,
-     f"[ASHRAE Handbook, Chapter 25]({_ASHRAE_URL}), §3.3 Commercial Indoor Farms → Design Conditions. Original VPD basis: not confirmed."),
-    ("Flowering and fruiting, indoor crops — ASHRAE (2023)", "ashrae-fruit", 1.00, 1.40,
+    ("Leafy greens and herbs, vegetative — ASHRAE (2023)", "ashrae-leafy", 0.65, 0.90, "Leafy greens & herbs",
+     "ASHRAE (2023)", _ASHRAE_URL,
+     f"[ASHRAE Handbook, Chapter 25]({_ASHRAE_URL}), §3.3 Commercial Indoor Farms → Design Conditions. "
+     "Original VPD basis: not confirmed."),
+    ("Flowering and fruiting, indoor crops — ASHRAE (2023)", "ashrae-fruit", 1.00, 1.40, "Flowering & fruiting",
+     "ASHRAE (2023)", _ASHRAE_URL,
      f"Same [handbook section]({_ASHRAE_URL}); includes tomatoes and cucumbers. Original VPD basis: not confirmed."),
-    ("Cucumber, winter fruit production — Bayer (2020)", "bayer", 0.40, 0.80,
-     "[*Fruit Length in Winter-Grown Cucumbers*](https://www.vegetables.bayer.com/ca/en-ca/resources/"
-     "growing-tips/cultivation-insights/fruit-length-in-winter-grown-cucumbers.html), February 12, 2020, "
-     "“Regulating humidity.” Original VPD basis: not confirmed."),
-    ("Strawberry, greenhouse production — Yamanaka et al. (2025)", "yamanaka", 0.80, 1.20,
-     "[Yamanaka et al., *Relationship between Vapor Pressure Deficit Condition and Water-stress Status in "
-     "Strawberry*](https://doi.org/10.2503/hortj.SZD-015), Introduction: 8–12 hPa, citing Lieten (2002); "
-     "not independently established by their experiment. Their measurements are air-based."),
+    ("Cucumber, winter fruit production — Bayer (2020)", "bayer", 0.40, 0.80, "Cucumber",
+     "Bayer (2020)", _BAYER_URL,
+     f"[*Fruit Length in Winter-Grown Cucumbers*]({_BAYER_URL}), February 12, 2020, “Regulating humidity.” "
+     "Original VPD basis: not confirmed."),
+    ("Strawberry, greenhouse production — Yamanaka et al. (2025)", "yamanaka", 0.80, 1.20, "Strawberry",
+     "Yamanaka et al. (2025)", _YAMANAKA_URL,
+     f"[Yamanaka et al., *Relationship between Vapor Pressure Deficit Condition and Water-stress Status in "
+     f"Strawberry*]({_YAMANAKA_URL}), Introduction: 8–12 hPa, citing Lieten (2002); not independently established "
+     "by their experiment. Their measurements are air-based."),
 ]
 
-RANGE_PRESETS = {name: {"id": pid, "range": (lo, hi), "source": src} for name, pid, lo, hi, src in _PRESETS}
+RANGE_PRESETS = {name: {"id": pid, "range": (lo, hi), "short": short, "cite": cite, "url": url, "source": src}
+                 for name, pid, lo, hi, short, cite, url, src in _PRESETS}
 PRESET_NAMES = list(RANGE_PRESETS) + [CUSTOM]
 DEFAULT_PRESET = _PRESETS[0][0]
 PRESET_IDS = {v["id"]: k for k, v in RANGE_PRESETS.items()} | {"custom": CUSTOM}
 
 ABOUT_RANGES = (
     "Published VPD recommendations often refer to air VPD. To use their numerical ranges as canopy-VPD targets, this "
-    "calculator adopts an explicit reference assumption: leaf temperature equals air temperature. At that reference "
-    "condition, air and leaf VPD are identical.\n\n"
-    "The selected limits then remain fixed. Your actual measured or estimated leaf temperature is used to calculate "
-    "canopy VPD and the humidity needed to reach the target.\n\n"
-    "This is a practical starting assumption, not evidence that the original authors assumed equal temperatures or "
-    "validated these ranges as canopy-VPD optima. Suitability depends on the crop and growing conditions; you can "
-    "edit the limits.")
+    "calculator assumes air and canopy VPD are identical.\n\n"
+    "The selected acceptable range remains fixed regardless of leaf temperature inputs. The measured or estimated leaf "
+    "temperature is used to calculate the humidity needed to reach the fixed range.")
+
+
+_LABEL_CITES = {"lopez": "Lopez 2026", "lopez-prop": "Lopez 2026", "runkle-mod": "Runkle 2021",
+                "runkle-low": "Runkle 2021", "ashrae-leafy": "ASHRAE 2023", "ashrae-fruit": "ASHRAE 2023",
+                "bayer": "Bayer 2020", "yamanaka": "Yamanaka 2025"}
+
+
+def display_label(name: str) -> str:
+    """Short dropdown label with the range; internal names and share ids are unchanged."""
+    if name not in RANGE_PRESETS:
+        return name
+    p = RANGE_PRESETS[name]
+    lo, hi = p["range"]
+    return f"{p['short']} — {lo:.2f}–{hi:.2f} kPa ({_LABEL_CITES[p['id']]})"
+
+
+def source_citation(name: str) -> str:
+    """One short linked citation, e.g. 'Source: [Lopez et al. (2026)](url)'."""
+    p = RANGE_PRESETS[name]
+    return f"Source: [{p['cite']}]({p['url']})"
 
 
 def preset_range(name: str):

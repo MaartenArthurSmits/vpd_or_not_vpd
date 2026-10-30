@@ -316,23 +316,15 @@ with tab_daynight:
         st.session_state["range_preset"] = presets.CUSTOM
 
     st.session_state["range_preset__w"] = st.session_state["range_preset"]
-    st.selectbox("Range preset", presets.PRESET_NAMES, key="range_preset__w", on_change=apply_range_preset)
-    st.caption("Provisional canopy targets using an equal-temperature reference.")
+    st.selectbox("Range preset", presets.PRESET_NAMES, key="range_preset__w", on_change=apply_range_preset,
+                 format_func=presets.display_label)
     chosen = st.session_state["range_preset"]
     if chosen in presets.RANGE_PRESETS:
-        a_, b_ = presets.preset_range(chosen)
-        st.caption(f"{a_:.2f}–{b_:.2f} kPa for both periods. Source: {presets.RANGE_PRESETS[chosen]['source']}")
+        st.caption(presets.source_citation(chosen))
     else:
-        st.caption("Edit the Day and Night limits below; the current limits are kept.")
+        st.caption("Edit the day and night limits below.")
     with st.expander("About these ranges"):
         st.markdown(presets.ABOUT_RANGES)
-        st.markdown(
-            "This equal-temperature reference is **this calculator's adaptation**, not a recommendation made by "
-            "the sources. Runkle (2021) describes subjective classifications. "
-            "[Lopez et al. (2026)](https://www.inside-grower.com/Article/?articleid=28096) is published greenhouse "
-            "guidance. [Yamanaka et al. (2025)](https://doi.org/10.2503/hortj.SZD-015) made air-based strawberry "
-            "measurements; its 0.8–1.2 kPa guidance cites Lieten (2002), not their own experiment. Saturation vapour "
-            "pressure follows [FAO-56, Eq. 11](https://www.fao.org/4/x0490e/x0490e07.htm).")
 
     st.caption("Uses the current Calculator conditions.")
 

@@ -294,7 +294,7 @@ def test_every_tab_renders_after_a_full_interaction_sequence():
     at = new_app().run()
     at.radio(key="mode").set_value(share.MODE_B).run()
     set_num(at, "t_air", 33.0)
-    at.selectbox(key="range_preset__w").set_value(presets.PRESET_NAMES[4]).run()
+    at.selectbox(key="range_preset__w").set_value(presets.PRESET_NAMES[5]).run()
     at.checkbox(key="val_johnston").set_value(True).run()
     assert not at.exception
 
@@ -636,7 +636,8 @@ def test_range_tab_only_edits_ranges_and_has_one_preset_selector():
     at = new_app().run()
     tab = at.tabs[1]
     assert [w.key for w in tab.selectbox] == ["range_preset__w"] and tab.selectbox[0].label == "Range preset"
-    assert tab.selectbox[0].options == presets.PRESET_NAMES and tab.selectbox[0].value == presets.DEFAULT_PRESET
+    assert tab.selectbox[0].options == [presets.display_label(n) for n in presets.PRESET_NAMES]
+    assert tab.selectbox[0].value == presets.DEFAULT_PRESET
     assert sorted(w.key for w in tab.number_input) == ["dn_hi_day__num", "dn_hi_night__num", "dn_lo_day__num", "dn_lo_night__num"]
     assert not any(w.key.startswith(("dn_t_", "dn_off_")) for w in tab.number_input)
     assert not tab.metric and not tab.info
@@ -648,7 +649,7 @@ def test_range_tab_only_edits_ranges_and_has_one_preset_selector():
 
 def test_preset_sets_both_periods_manual_edit_changes_one_and_new_preset_resets_both():
     at = new_app().run()
-    name = presets.PRESET_NAMES[3]                                           # ASHRAE leafy greens, 0.65-0.90
+    name = presets.PRESET_NAMES[4]                                           # ASHRAE leafy greens, 0.65-0.90
     at.selectbox(key="range_preset__w").set_value(name).run()
     assert limits(at) == ((0.65, 0.9), (0.65, 0.9)) and at.session_state["range_preset"] == name
     set_num(at, "dn_hi_night", 1.1)
@@ -657,7 +658,7 @@ def test_preset_sets_both_periods_manual_edit_changes_one_and_new_preset_resets_
     assert limits(at) == ((0.65, 0.9), (0.65, 1.1))
     at.selectbox(key="range_preset__w").set_value(presets.CUSTOM).run()      # Custom keeps the bounds
     assert limits(at) == ((0.65, 0.9), (0.65, 1.1))
-    at.selectbox(key="range_preset__w").set_value(presets.PRESET_NAMES[6]).run()
+    at.selectbox(key="range_preset__w").set_value(presets.PRESET_NAMES[7]).run()
     assert limits(at) == ((0.8, 1.2), (0.8, 1.2))
 
 
@@ -682,14 +683,14 @@ def test_changing_bounds_does_not_change_calculator_conditions_and_each_period_h
 
 def test_range_settings_survive_reruns_and_link_round_trip():
     at = new_app().run()
-    at.selectbox(key="range_preset__w").set_value(presets.PRESET_NAMES[5]).run()
+    at.selectbox(key="range_preset__w").set_value(presets.PRESET_NAMES[6]).run()
     set_num(at, "dn_lo_night", 0.5)
     link = {k: qp(at, k) for k in at.query_params}
     assert link["rp"] == "custom" and link["nlo"] == "0.5" and link["dlo"] == "0.4" and not {"dt", "nt", "doff", "noff"} & set(link)
     fresh = app_with_params(link)
     assert limits(fresh) == ((0.4, 0.8), (0.5, 0.8)) and fresh.session_state["range_preset"] == presets.CUSTOM
     same = app_with_params({"dlo": "0.4", "dhi": "0.8", "nlo": "0.4", "nhi": "0.8", "rp": "bayer"})
-    assert same.session_state["range_preset"] == presets.PRESET_NAMES[5]
+    assert same.session_state["range_preset"] == presets.PRESET_NAMES[6]
 
 
 def test_obsolete_day_night_condition_parameters_do_not_override_calculator():
@@ -703,7 +704,7 @@ def test_obsolete_day_night_condition_parameters_do_not_override_calculator():
 
 def test_reset_restores_calculator_defaults_and_keeps_ranges():
     at = new_app().run()
-    at.selectbox(key="range_preset__w").set_value(presets.PRESET_NAMES[4]).run()
+    at.selectbox(key="range_preset__w").set_value(presets.PRESET_NAMES[5]).run()
     at.radio(key="mode").set_value(share.MODE_B).run()
     at.radio(key="calc_leaf_method").set_value(share.MEASURED_METHOD).run()
     set_num(at, "t_air", 31.0)
@@ -717,7 +718,7 @@ def test_reset_restores_calculator_defaults_and_keeps_ranges():
     assert live_values(at) == {"rh": 60.0, "t_air": 22.0, "calc_offset": -1.0}
     assert at.session_state["calc_leaf_meas"] == 22.0
     assert at.session_state["target_vpd"] == vpd.calculate_vpd(22.0, 60.0, -1.0).vpd_leaf
-    assert limits(at) == ((1.0, 1.4), (1.0, 1.4)) and at.session_state["range_preset"] == presets.PRESET_NAMES[4]
+    assert limits(at) == ((1.0, 1.4), (1.0, 1.4)) and at.session_state["range_preset"] == presets.PRESET_NAMES[5]
     assert at.radio(key="calc_period").value == "Night"
     assert panel_payloads(at)[0]["epoch"] == 1 and (qp(at, "t"), qp(at, "rh"), qp(at, "off")) == ("22", "60", "-1")
 
@@ -733,7 +734,7 @@ def test_copy_link_reflects_latest_range_edits_and_the_url_is_not_shown():
 
 def test_preset_limits_stay_fixed_canopy_targets_while_temperatures_change():
     at = new_app().run()
-    at.selectbox(key="range_preset__w").set_value(presets.PRESET_NAMES[6]).run()          # strawberry 0.80-1.20 kPa
+    at.selectbox(key="range_preset__w").set_value(presets.PRESET_NAMES[7]).run()          # strawberry 0.80-1.20 kPa
     at.radio(key="mode").set_value(share.MODE_B).run()
     set_num(at, "target_vpd", 1.0)
     for t_air, t_leaf, rh in ((22.0, 21.0, 56.2), (33.0, 32.0, 74.6)):
@@ -742,4 +743,35 @@ def test_preset_limits_stay_fixed_canopy_targets_while_temperatures_change():
         assert live(at)["target"] == {"lo": 0.8, "hi": 1.2, "kind": "leaf", "period": "Day"}
         assert round(vpd.calculate_required_rh(t_air, 1.0, vpd.LEAF, t_leaf - t_air).rh, 1) == rh
         assert limits(at) == ((0.8, 1.2), (0.8, 1.2)) and live_values(at)["calc_offset"] == t_leaf - t_air
-    assert any("Provisional canopy targets using an equal-temperature reference." in c.value for c in at.tabs[1].caption)
+    captions = [c.value for c in at.tabs[1].caption]
+    assert "Provisional canopy targets using an equal-temperature reference." not in captions
+    assert "Source: [Yamanaka et al. (2025)](https://doi.org/10.2503/hortj.SZD-015)" in captions
+
+
+def test_dropdown_labels_show_the_range_and_the_source_caption_is_one_short_link():
+    at = new_app().run()
+    labels = at.tabs[1].selectbox[0].options
+    assert labels == ["Established plants — 0.70–1.30 kPa (Lopez 2026)", "Established plants — 0.70–1.50 kPa (Runkle 2021)",
+                      "Propagation — 0.30–0.70 kPa (Lopez 2026)", "Propagation — 0.30–0.70 kPa (Runkle 2021)",
+                      "Leafy greens & herbs — 0.65–0.90 kPa (ASHRAE 2023)", "Flowering & fruiting — 1.00–1.40 kPa (ASHRAE 2023)",
+                      "Cucumber — 0.40–0.80 kPa (Bayer 2020)", "Strawberry — 0.80–1.20 kPa (Yamanaka 2025)", "Custom range"]
+    assert "Source: [Lopez et al. (2026)](https://www.inside-grower.com/Article/?articleid=28096)" in [c.value for c in at.tabs[1].caption]
+    at.selectbox(key="range_preset__w").set_value(presets.CUSTOM).run()
+    assert "Edit the day and night limits below." in [c.value for c in at.tabs[1].caption]
+    about = next(e for e in at.expander if e.label == "About these ranges")
+    assert len(about.markdown) == 1 and about.markdown[0].value == presets.ABOUT_RANGES
+
+
+def test_lopez_and_runkle_propagation_keep_their_identity_despite_identical_bounds():
+    lopez, runkle = presets.PRESET_NAMES[2], presets.PRESET_NAMES[3]
+    assert presets.preset_range(lopez) == presets.preset_range(runkle) == (0.3, 0.7)
+    at = new_app().run()
+    at.selectbox(key="range_preset__w").set_value(lopez).run()
+    assert limits(at) == ((0.3, 0.7), (0.3, 0.7)) and at.session_state["range_preset"] == lopez
+    at.run()
+    assert at.session_state["range_preset"] == lopez and qp(at, "rp") == "lopez-prop"
+    fresh = app_with_params({k: qp(at, k) for k in at.query_params})
+    assert fresh.session_state["range_preset"] == lopez and fresh.selectbox(key="range_preset__w").value == lopez
+    at.selectbox(key="range_preset__w").set_value(runkle).run()
+    assert at.session_state["range_preset"] == runkle and qp(at, "rp") == "runkle-low"
+    assert app_with_params({"dlo": "0.3", "dhi": "0.7", "nlo": "0.3", "nhi": "0.7", "rp": "runkle-low"}).session_state["range_preset"] == runkle
