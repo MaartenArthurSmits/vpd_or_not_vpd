@@ -38,13 +38,11 @@ _NUMERIC = {
 }
 _KIND = {"air": AIR_LABEL, "leaf": LEAF_LABEL}
 
-# Day/night settings: period -> query-key prefix. Per period the keys are
-#   <p>t air temperature, <p>off leaf offset, <p>lo / <p>hi VPD limits, <p>k air|leaf, <p>p preset id.
+# Acceptable range per period -> query-key prefix: <p>lo / <p>hi VPD limits, <p>k air|leaf basis. The single range
+# preset is `rp`. Older links' <p>t, <p>off and <p>p parameters are ignored (the Calculator's conditions are used).
 # Bounds equal the interface input bounds; invalid values are ignored (not clamped), as for the main settings.
 _PERIODS = {"day": "d", "night": "n"}
 _PERIOD_NUMERIC = {  # query suffix -> (session-state key pattern, min, max)
-    "t": ("dn_t_{p}", -10.0, 60.0),
-    "off": ("dn_off_{p}", -10.0, 10.0),
     "lo": ("dn_lo_{p}", 0.0, 10.0),
     "hi": ("dn_hi_{p}", 0.0, 10.0),
 }
@@ -56,9 +54,6 @@ HEATMAP_DEFAULTS = {"hm_tmin": 10.0, "hm_tmax": 40.0, "hm_rhmin": 10.0, "hm_rhma
                     "hm_cs": "RdYlBu_r", "hm_step": 0.5, "hm_target": True, "hm_point": True}   # = widget defaults
 _HEATMAP_NUMERIC = ("htmin", "htmax", "hrmin", "hrmax", "hz")
 _BOOL_KEYS = {"hg": "hm_target", "hp": "hm_point"}      # highlight target range / mark selected point
-# Preset identity (needed because different presets can have identical numerical ranges).
-_STAGE_IDS = {"seed": "Seedlings / propagation", "veg": "Vegetative", "flow": "Flowering",
-              "gen": "General horticulture", "custom": presets.CUSTOM}
 
 
 def parse_params(params: Mapping[str, str]) -> dict:
@@ -105,8 +100,8 @@ def parse_params(params: Mapping[str, str]) -> dict:
                     out[pattern.format(p=period)] = v
         if params.get(pre + "k") in _KIND:
             out[f"dn_kind_{period}"] = _KIND[params[pre + "k"]]
-        if params.get(pre + "p") in _STAGE_IDS:
-            out[f"dn_preset_{period}"] = _STAGE_IDS[params[pre + "p"]]   # identity only; limits are separate
+    if params.get("rp") in presets.PRESET_IDS:
+        out["range_preset"] = presets.PRESET_IDS[params["rp"]]           # identity only; limits are separate
     if "calc_leaf_meas" in out:
         out["calc_leaf_method"] = MEASURED_METHOD
     elif "calc_offset" in out:
@@ -133,16 +128,15 @@ def build_params(state: Mapping) -> dict:
         p["lm"] = _fmt(state["calc_leaf_meas"])
     else:
         p["off"] = _fmt(state["calc_offset"])
-    ids = {name: i for i, name in _STAGE_IDS.items()}
+    ids = {name: i for i, name in presets.PRESET_IDS.items()}
     for period, pre in _PERIODS.items():
-        if f"dn_t_{period}" not in state:        # day/night settings not initialised (e.g. unit tests)
+        if f"dn_lo_{period}" not in state:       # acceptable range not initialised (e.g. unit tests)
             continue
         for suffix, (pattern, _lo, _hi) in _PERIOD_NUMERIC.items():
             p[pre + suffix] = _fmt(state[pattern.format(p=period)])
         p[pre + "k"] = "air" if state.get(f"dn_kind_{period}", AIR_LABEL) == AIR_LABEL else "leaf"
-        preset = state.get(f"dn_preset_{period}")
-        if preset in ids:
-            p[pre + "p"] = ids[preset]
+    if state.get("range_preset") in ids:
+        p["rp"] = ids[state["range_preset"]]
     # Heatmap controls. Their widgets are created after this runs on a fresh session, so fall back to the
     # control defaults (HEATMAP_DEFAULTS) until the widgets exist.
     for q in _HEATMAP_NUMERIC:

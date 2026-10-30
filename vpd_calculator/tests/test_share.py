@@ -45,20 +45,18 @@ def test_share_url_contains_query():
     assert url.startswith("http://x/?") and "t=25.5" in url
 
 
-# ---- day/night settings --------------------------------------------------------------------
+# ---- acceptable range (day/night limits and one preset) --------------------------------------
 DN_STATE = STATE | {
-    "dn_t_day": 33.0, "dn_off_day": -2.0, "dn_lo_day": 1.0, "dn_hi_day": 1.0,
-    "dn_kind_day": share.LEAF_LABEL, "dn_preset_day": "Vegetative",
-    "dn_t_night": 17.0, "dn_off_night": 1.0, "dn_lo_night": 0.6, "dn_hi_night": 1.0,
-    "dn_kind_night": share.AIR_LABEL, "dn_preset_night": presets.CUSTOM,
+    "dn_lo_day": 1.0, "dn_hi_day": 1.0, "dn_kind_day": share.LEAF_LABEL,
+    "dn_lo_night": 0.6, "dn_hi_night": 1.0, "dn_kind_night": share.AIR_LABEL, "range_preset": presets.CUSTOM,
 }
 
 
-def test_day_night_round_trip_including_equal_limits_and_identity():
+def test_range_round_trip_including_equal_limits_and_identity():
     params = share.build_params(DN_STATE)
-    assert {k: params[k] for k in ("dt", "doff", "dlo", "dhi", "dk", "dp", "nt", "noff", "nlo", "nhi", "nk", "np")} == {
-        "dt": "33", "doff": "-2", "dlo": "1", "dhi": "1", "dk": "leaf", "dp": "veg",
-        "nt": "17", "noff": "1", "nlo": "0.6", "nhi": "1", "nk": "air", "np": "custom"}
+    assert {k: params[k] for k in ("dlo", "dhi", "dk", "nlo", "nhi", "nk", "rp")} == {
+        "dlo": "1", "dhi": "1", "dk": "leaf", "nlo": "0.6", "nhi": "1", "nk": "air", "rp": "custom"}
+    assert not {"dt", "doff", "nt", "noff", "dp", "np"} & set(params)
     parsed = share.parse_params(params)
     for k, v in DN_STATE.items():
         if k != "calc_leaf_meas":
@@ -67,46 +65,40 @@ def test_day_night_round_trip_including_equal_limits_and_identity():
 
 def test_every_preset_has_a_share_id_and_round_trips():
     for name in presets.PRESET_NAMES:
-        for period in ("day", "night"):
-            parsed = share.parse_params(share.build_params(DN_STATE | {f"dn_preset_{period}": name}))
-            assert parsed[f"dn_preset_{period}"] == name
+        assert share.parse_params(share.build_params(DN_STATE | {"range_preset": name}))["range_preset"] == name
 
 
-def test_legacy_and_partial_links_leave_day_night_untouched():
+def test_legacy_and_partial_links_leave_the_range_untouched_and_old_condition_parameters_are_ignored():
     legacy = share.parse_params({"m": "b", "t": "25", "rh": "60", "tv": "1.1", "lo": "1.2", "hi": "1.5"})
     assert not any(k.startswith("dn_") for k in legacy)
-    partial = share.parse_params({"dt": "30", "nk": "leaf"})
-    assert partial == {"dn_t_day": 30.0, "dn_kind_night": share.LEAF_LABEL}
+    assert share.parse_params({"dt": "30", "doff": "-2", "nt": "10", "noff": "1", "dp": "veg", "np": "seed",
+                               "nk": "leaf"}) == {"dn_kind_night": share.LEAF_LABEL}
 
 
-def test_build_params_omits_day_night_when_state_has_none():
-    day_night_keys = {"dt", "doff", "dlo", "dhi", "dk", "dp", "nt", "noff", "nlo", "nhi", "nk", "np"}
-    assert not day_night_keys & set(share.build_params(STATE))
+def test_build_params_omits_range_when_state_has_none():
+    assert not {"dlo", "dhi", "dk", "nlo", "nhi", "nk", "rp"} & set(share.build_params(STATE))
 
 
 @pytest.mark.parametrize("bad", [
-    {"dt": "abc"}, {"dt": "nan"}, {"dt": "inf"}, {"dt": "-inf"}, {"dt": "61"}, {"dt": "-10.1"}, {"dt": ""},
-    {"doff": "10.5"}, {"noff": "-11"}, {"noff": "NaN"}, {"dlo": "-0.1"}, {"dhi": "10.1"}, {"nlo": "1e999"},
-    {"dk": "water"}, {"nk": "AIR"}, {"dk": ""}, {"dp": "unknown"}, {"np": "Vegetative"}, {"dp": "1"},
+    {"dlo": "-0.1"}, {"dhi": "10.1"}, {"nlo": "1e999"}, {"nhi": "nan"}, {"dlo": "abc"}, {"dhi": ""},
+    {"dk": "water"}, {"nk": "AIR"}, {"dk": ""}, {"rp": "unknown"}, {"rp": "Vegetative"}, {"rp": "1"},
 ])
-def test_invalid_day_night_parameters_are_ignored(bad):
+def test_invalid_range_parameters_are_ignored(bad):
     assert share.parse_params(bad) == {}
 
 
-def test_day_night_bounds_are_inclusive_and_not_clamped():
-    ok = share.parse_params({"dt": "60", "nt": "-10", "doff": "10", "noff": "-10", "dlo": "0", "nhi": "10"})
-    assert ok == {"dn_t_day": 60.0, "dn_t_night": -10.0, "dn_off_day": 10.0, "dn_off_night": -10.0,
-                  "dn_lo_day": 0.0, "dn_hi_night": 10.0}
+def test_range_bounds_are_inclusive_and_not_clamped():
+    assert share.parse_params({"dlo": "0", "nhi": "10"}) == {"dn_lo_day": 0.0, "dn_hi_night": 10.0}
 
 
-def test_resolve_stage_keeps_identity_for_identical_ranges_and_never_changes_limits():
-    # Vegetative night and General horticulture night are both 0.8-1.2
-    assert presets.resolve_stage("Vegetative", 0.8, 1.2, "night") == "Vegetative"
-    assert presets.resolve_stage("General horticulture", 0.8, 1.2, "night") == "General horticulture"
-    assert presets.resolve_stage(None, 0.8, 1.2, "night") == "General horticulture"      # derived
-    assert presets.resolve_stage(presets.CUSTOM, 1.0, 1.0, "day") == presets.CUSTOM
-    assert presets.resolve_stage("Flowering", 0.8, 1.2, "day") == "General horticulture"  # inconsistent id
-    assert presets.resolve_stage("Flowering", 0.7, 1.1, "day") == presets.CUSTOM
+def test_resolve_preset_keeps_identity_when_it_still_fits_and_never_changes_limits():
+    first, second = presets.PRESET_NAMES[0], presets.PRESET_NAMES[1]
+    (lo, hi) = presets.preset_range(first)
+    assert presets.resolve_preset(first, (lo, hi), (lo, hi)) == first
+    assert presets.resolve_preset(presets.CUSTOM, (lo, hi), (lo, hi)) == presets.CUSTOM
+    assert presets.resolve_preset(second, (lo, hi), (lo, hi)) == first            # inconsistent identity
+    assert presets.resolve_preset(first, (lo, hi), (lo, hi + 0.1)) == presets.CUSTOM
+    assert presets.resolve_preset(None, (0.7, 1.3), (0.7, 1.3)) == presets.DEFAULT_PRESET
 
 
 # ---- heatmap settings ----------------------------------------------------------------------
@@ -142,7 +134,7 @@ def test_heatmap_step_and_toggle_round_trip(step, flag):
 
 
 def test_older_links_do_not_touch_heatmap_settings():
-    assert share.parse_params({"t": "25", "dt": "30"}).keys() == {"t_air", "dn_t_day"}
+    assert share.parse_params({"t": "25", "dt": "30"}).keys() == {"t_air"}
 
 
 def test_build_params_before_heatmap_widgets_exist_uses_control_defaults():

@@ -15,10 +15,8 @@ Five tabs: **Calculator**, **Acceptable range**, **Compare treatments**, **VPD H
 - **Bidirectional calculator:** VPD from temperature and RH, or the RH required for a target air or leaf VPD.
 - **Leaf temperature:** an offset (illustrative scenarios 0, -1, -2, +1, +2 °C or custom) or a measured value, with an
   explanation of air versus leaf VPD.
-- **Target VPD range:** illustrative growth-stage presets (seedlings/propagation, vegetative, flowering, general
-  horticulture) or a custom range, with the corresponding RH range.
-- **Day & Night tab:** independently configured day and night temperature, leaf offset and target VPD range, with
-  required RH ranges and condensation guidance.
+- **Acceptable range:** one range preset (published starting ranges with sources) sets the Day and Night VPD limits, which
+  can then be edited independently. The Calculator and this tab show the same result and range bar.
 - **Compare treatments:** an editable table of treatments (air temperature, RH, leaf offset) with leaf temperature,
   air VPD and leaf VPD for each valid row, flagged condensation risk and a CSV download.
 - **Heatmap:** interactive temperature x RH plot (air or leaf VPD) with contours, target range and selected point.

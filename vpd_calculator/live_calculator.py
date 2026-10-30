@@ -14,6 +14,7 @@ import streamlit as st
 CSS = """
 .vpd { font-family: inherit; color: var(--st-text-color, inherit); display: grid;
        grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 2rem; }
+.vpd.ro { grid-template-columns: 1fr; }
 @media (max-width: 800px) { .vpd { grid-template-columns: 1fr; } }
 .field { margin-bottom: 1rem; }
 .field label { display: block; font-size: 0.875rem; margin-bottom: 0.25rem; }
@@ -188,6 +189,10 @@ export default function (component) {
   // Python's data has caught up (a changed input set, e.g. a mode switch, always takes Python's values).
   const sig = d.inputs.map((f) => f.key).join(',');
   for (const f of d.inputs) values[f.key] = f.value;
+  if (parentElement.__vpdEpoch !== d.epoch) {                  // Reset: unsent local edits must not undo it
+    parentElement.__vpdPending = null;
+    parentElement.__vpdEpoch = d.epoch;
+  }
   const pending = parentElement.__vpdPending;
   if (pending && pending.sig === sig) {
     if (d.inputs.every((f) => f.value === pending.values[f.key])) parentElement.__vpdPending = null;
@@ -200,16 +205,22 @@ export default function (component) {
   const left = document.createElement('div');
   const panel = document.createElement('div');
   panel.className = 'panel';
-  root.append(left, panel);
+  if (!d.readonly) root.append(left);                          // display-only copy shows just the panel
+  else root.classList.add('ro');
+  root.append(panel);
   parentElement.appendChild(root);
 
-  const refresh = () => { panel.innerHTML = '<h3>Results</h3>' + resultsHtml(d, values); };
+  const refresh = () => {
+    let html = resultsHtml(d, values);
+    if (d.readonly) html = html.replace(/<div class="hint">Edit this target[^<]*<\/div>/, '');
+    panel.innerHTML = '<h3>Results</h3>' + html;
+  };
   const commit = () => {
     parentElement.__vpdPending = { sig, values: { ...values } };   // newer than any rerun still in flight
     setStateValue('values', { ...values });
   };
 
-  for (const f of d.inputs) {
+  for (const f of (d.readonly ? [] : d.inputs)) {
     const box = document.createElement('div');
     box.className = 'field';
     const label = document.createElement('label');
@@ -311,3 +322,8 @@ def copy_link_button(url: str):
     if _copy_component is None:
         _copy_component = st.components.v2.component("vpd_copy_link", css=COPY_CSS, js=COPY_JS)
     return _copy_component(key="copy_link", data={"url": url})
+
+
+def result_panel(data: dict):
+    """Display-only copy of the Calculator's result panel (same JS, same data; no inputs, nothing is sent back)."""
+    return _mount(key="range_panel", data=data)

@@ -63,47 +63,14 @@ def test_default_run_has_no_exceptions_and_known_values():
     assert not at.exception
     assert at.radio(key="mode").value == share.MODE_A
     assert live_values(at) == {"rh": 60.0, "t_air": 22.0, "calc_offset": -1.0}      # fresh default offset
-    assert live(at)["target"] == {"lo": 0.8, "hi": 1.2, "kind": "air", "period": "Day"}
+    assert live(at)["target"] == {"lo": 0.7, "hi": 1.3, "kind": "air", "period": "Day"}
+    assert at.selectbox(key="range_preset__w").value == presets.DEFAULT_PRESET
 
 
 def test_exactly_five_tabs():
     at = new_app().run()
     assert [t.label for t in at.tabs] == ["Calculator", "Acceptable range", "Compare treatments", "VPD Heatmap",
                                           "Methods & References"]
-
-
-def test_day_night_controls_and_results_are_in_their_own_tab_only():
-    at = new_app().run()
-    calc, daynight = at.tabs[0], at.tabs[1]
-    day_night_keys = ("dn_t_day__num", "dn_off_night__num", "dn_lo_day__num", "dn_hi_night__num")
-    assert all(any(w.key == k for w in daynight.number_input) for k in day_night_keys)
-    assert not any(w.key.startswith("dn_") for w in calc.number_input)
-    assert not any(w.key.startswith("dn_") for w in calc.selectbox)
-    assert {w.key for w in daynight.radio} >= {"dn_kind_day", "dn_kind_night"}
-    assert {w.key for w in daynight.selectbox} >= {"dn_preset_day", "dn_preset_night"}
-    assert not any(w.key.startswith("dn_") for w in calc.radio)
-    assert any(m.label.startswith("Day RH range") for m in daynight.metric)
-    assert any(m.label.startswith("Night RH range") for m in daynight.metric)
-    assert not any(m.label.startswith(("Day ", "Night ")) for m in calc.metric)
-    assert any("Condensation guidance" in i.value for i in daynight.info)
-    assert not any("Condensation guidance" in i.value for i in calc.info)
-
-
-def test_day_night_settings_are_independent_of_calculator_and_survive_reruns():
-    at = new_app().run()
-    set_num(at, "dn_t_day", 30.0)
-    set_num(at, "t_air", 18.0)
-    at.run()
-    assert at.session_state["dn_t_day"] == 30.0 and at.session_state["t_air"] == 18.0
-    assert at.session_state["dn_t_night"] == 17.0
-    assert qp(at, "dt") == "30" and qp(at, "t") == "18"
-
-
-def test_interface_values_use_one_decimal_place():
-    at = new_app().run()
-    assert at.metric and all(ONE_DECIMAL.match(m.value) for m in at.metric), [m.value for m in at.metric]
-    at.radio(key="mode").set_value(share.MODE_B).run()
-    assert all(ONE_DECIMAL.match(m.value) for m in at.metric), [m.value for m in at.metric]
 
 
 def test_switch_to_rh_mode_transfers_the_current_canopy_vpd():
@@ -224,79 +191,7 @@ def test_calculator_has_no_separate_target_range_controls():
     assert "Acceptable range" in [s.value for s in at.subheader]
 
 
-def test_day_night_selector_chooses_target_without_changing_calculator_inputs():
-    at = new_app().run()
-    at.selectbox(key="dn_preset_night").set_value("Flowering").run()
-    at.radio(key="dn_kind_night").set_value(share.LEAF_LABEL).run()
-    set_num(at, "t_air", 27.0)
-    before = live_values(at)
-    assert at.radio(key="calc_period").value == "Day"
-    assert live(at)["target"] == {"lo": 0.8, "hi": 1.2, "kind": "air", "period": "Day"}
-    at.radio(key="calc_period").set_value("Night").run()
-    assert live(at)["target"] == {"lo": 1.0, "hi": 1.5, "kind": "leaf", "period": "Night"}
-    assert live_values(at) == before and at.session_state["dn_t_night"] == 17.0
-
-
-def test_point_and_invalid_targets_are_passed_to_the_panel():
-    at = new_app().run()
-    at.selectbox(key="dn_preset_day").set_value("Vegetative").run()               # 1.0-1.0 kPa
-    assert live(at)["target"]["lo"] == live(at)["target"]["hi"] == 1.0
-    set_num(at, "dn_lo_day", 2.0)
-    set_num(at, "dn_hi_day", 1.0)
-    assert live(at)["target"] is None and not at.exception
-
-
 # ---- day and night sections --------------------------------------------------------------------
-def test_day_and_night_sections_are_stacked_and_independent():
-    at = new_app().run()
-    day = metric_starting(at, "Day RH range")
-    night = metric_starting(at, "Night RH range")
-    assert "22.0 °C" in day.label and "17.0 °C" in night.label
-    rr_n = vpd.rh_range_for_vpd_range(17, 0.8, 1.2)
-    assert night.value == f"{rr_n['rh_min']:.1f} - {rr_n['rh_max']:.1f} %"
-    set_num(at, "dn_t_night", 15.0)
-    set_num(at, "dn_off_night", -2.0)
-    at.selectbox(key="dn_preset_night").set_value("Flowering").run()
-    assert (at.session_state["dn_lo_night"], at.session_state["dn_hi_night"]) == (1.0, 1.5)
-    assert at.session_state["dn_t_day"] == 22.0 and (at.session_state["dn_lo_day"], at.session_state["dn_hi_day"]) == (0.8, 1.2)
-    rr_n = vpd.rh_range_for_vpd_range(15, 1.0, 1.5, vpd.AIR, -2.0)
-    assert metric_starting(at, "Night RH range").value == f"{rr_n['rh_min']:.1f} - {rr_n['rh_max']:.1f} %"
-    assert metric_starting(at, "Day RH range").value == f"{vpd.rh_range_for_vpd_range(22, 0.8, 1.2)['rh_min']:.1f} - " \
-                                                         f"{vpd.rh_range_for_vpd_range(22, 0.8, 1.2)['rh_max']:.1f} %"
-    assert not at.exception
-
-
-def test_day_night_presets_use_period_specific_ranges():
-    at = new_app().run()
-    at.selectbox(key="dn_preset_day").set_value("Seedlings / propagation").run()
-    at.selectbox(key="dn_preset_night").set_value("Seedlings / propagation").run()
-    assert (at.session_state["dn_lo_day"], at.session_state["dn_hi_day"]) == (0.8, 0.8)
-    assert (at.session_state["dn_lo_night"], at.session_state["dn_hi_night"]) == (0.6, 1.0)
-
-
-def test_condensation_guidance_depends_on_leaf_offset():
-    at = new_app().run()
-    texts = [e.value for e in list(at.info) + list(at.warning)]
-    assert any("Condensation guidance" in t and "not cooler" in t for t in texts)
-    set_num(at, "dn_off_night", -3.0)
-    rh_c = float(vpd.condensation_rh(17, 14))
-    texts = [e.value for e in list(at.info) + list(at.warning)]
-    assert any("Condensation guidance" in t and f"{rh_c:.1f} % RH" in t for t in texts)
-
-
-def test_day_night_unattainable_range_shows_error():
-    at = new_app().run()
-    set_num(at, "dn_hi_day", 4.0)
-    set_num(at, "dn_lo_day", 3.5)           # both exceed es(22) ~ 2.6 kPa
-    assert any(e.value.startswith("Day: no RH") for e in at.error)
-
-
-def test_day_night_inverted_range_shows_error():
-    at = new_app().run()
-    set_num(at, "dn_lo_night", 2.0)
-    assert any("Night: lower limit must not exceed" in e.value for e in at.error)
-
-
 # ---- validation messages ------------------------------------------------------------------------
 # ---- share links and query parameters --------------------------------------------------------------
 def test_share_link_restores_settings():
@@ -399,7 +294,7 @@ def test_every_tab_renders_after_a_full_interaction_sequence():
     at = new_app().run()
     at.radio(key="mode").set_value(share.MODE_B).run()
     set_num(at, "t_air", 33.0)
-    at.selectbox(key="dn_preset_day").set_value("Flowering").run()
+    at.selectbox(key="range_preset__w").set_value(presets.PRESET_NAMES[4]).run()
     at.checkbox(key="val_johnston").set_value(True).run()
     assert not at.exception
 
@@ -407,26 +302,6 @@ def test_every_tab_renders_after_a_full_interaction_sequence():
 # ---- single-value (point) targets: equal lower and upper limits -----------------------------------
 def texts(elements):
     return [e.value for e in elements]
-
-
-def test_day_and_night_point_targets_use_single_value_display():
-    at = new_app().run()
-    at.selectbox(key="dn_preset_day").set_value("Vegetative").run()      # day 1.0-1.0 kPa
-    assert not at.exception
-    m = metric_starting(at, "Day required RH for air VPD 1.0 kPa")
-    assert " - " not in m.value and m.value.endswith(" %")
-    assert any("Day target air VPD: 1.0 kPa" in v for v in texts(at.markdown))
-    # night preset for Vegetative is a genuine range and keeps the range display
-    at.selectbox(key="dn_preset_night").set_value("Vegetative").run()
-    n = metric_starting(at, "Night RH range for air VPD 0.8-1.2 kPa")
-    assert " - " in n.value
-
-
-def test_day_point_target_unattainable():
-    at = new_app().run()
-    set_num(at, "dn_hi_day", 5.0)
-    set_num(at, "dn_lo_day", 5.0)
-    assert any("Day: no RH between 0 and 100 % gives a air VPD of 5.0 kPa" in e for e in texts(at.error))
 
 
 # ---- validation-plot PNG cache: a download must match the displayed graph --------------------------
@@ -511,8 +386,8 @@ def es_hand(t):                                  # stand-alone FAO-56 Eq. 11, in
     return 0.6108 * math.exp(17.27 * t / (t + 237.3))
 
 
-ACCEPTANCE = {"dt": "33", "doff": "-2", "dlo": "1.0", "dhi": "1.0", "dk": "leaf", "dp": "veg",
-              "nt": "17", "noff": "1", "nlo": "0.6", "nhi": "1.0", "nk": "air", "np": "seed"}
+ACCEPTANCE = {"dlo": "1.0", "dhi": "1.0", "dk": "leaf", "nlo": "0.6", "nhi": "1.0", "nk": "air", "rp": "custom"}
+OBSOLETE = {"dt": "33", "doff": "-2", "nt": "12", "noff": "1", "dp": "veg", "np": "seed"}      # old per-period parameters
 
 
 def app_with_params(params):
@@ -527,115 +402,6 @@ def qp(at, key):
     return v[0] if isinstance(v, list) else v
 
 
-def test_day_night_link_restores_controls_and_rh_results_in_fresh_session():
-    at = app_with_params(ACCEPTANCE)
-    assert not at.exception
-    s = at.session_state
-    # controls
-    assert at.number_input(key="dn_t_day__num").value == 33.0
-    assert at.number_input(key="dn_off_day__num").value == -2.0
-    assert at.number_input(key="dn_lo_day__num").value == 1.0 == at.number_input(key="dn_hi_day__num").value
-    assert at.radio(key="dn_kind_day").value == share.LEAF_LABEL
-    assert at.selectbox(key="dn_preset_day").value == "Vegetative"
-    assert at.selectbox(key="dn_offset_preset_day").value == "-2 °C"
-    assert at.number_input(key="dn_t_night__num").value == 17.0
-    assert at.number_input(key="dn_off_night__num").value == 1.0
-    assert at.number_input(key="dn_lo_night__num").value == 0.6
-    assert at.number_input(key="dn_hi_night__num").value == 1.0
-    assert at.radio(key="dn_kind_night").value == share.AIR_LABEL
-    assert at.selectbox(key="dn_preset_night").value == "Seedlings / propagation"
-    assert at.selectbox(key="dn_offset_preset_night").value == "+1 °C"
-    # calculated results (hand-computed with a stand-alone equation)
-    day_rh = 100 * (es_hand(33 - 2) - 1.0) / es_hand(33)
-    m = metric_starting(at, "Day required RH for leaf VPD 1.0 kPa at 33.0 °C")
-    assert m.value == f"{day_rh:.1f} %"
-    rh_lo, rh_hi = 100 * (1 - 1.0 / es_hand(17)), 100 * (1 - 0.6 / es_hand(17))
-    n = metric_starting(at, "Night RH range for air VPD 0.6-1.0 kPa at 17.0 °C")
-    assert n.value == f"{rh_lo:.1f} - {rh_hi:.1f} %"
-    # the main calculator is untouched
-    assert (s["t_air"], s["rh"], s["vpd_lo"], s["vpd_hi"], s["calc_offset"]) == (22.0, 60.0, 0.8, 1.2, -1.0)
-    assert live_values(at) == {"rh": 60.0, "t_air": 22.0, "calc_offset": -1.0}
-
-
-def test_share_link_restores_preset_identity_and_custom_status():
-    # Vegetative night and General horticulture night share the range 0.8-1.2 kPa.
-    at = app_with_params({"nlo": "0.8", "nhi": "1.2", "np": "veg", "dlo": "0.9", "dhi": "1.3", "dp": "custom"})
-    assert not at.exception
-    assert at.selectbox(key="dn_preset_night").value == "Vegetative"
-    assert at.selectbox(key="dn_preset_day").value == "Custom"
-    assert (at.session_state["dn_lo_night"], at.session_state["dn_hi_night"]) == (0.8, 1.2)   # limits not overwritten
-    assert (at.session_state["dn_lo_day"], at.session_state["dn_hi_day"]) == (0.9, 1.3)
-    at2 = app_with_params({"nlo": "0.8", "nhi": "1.2", "np": "gen"})
-    assert at2.selectbox(key="dn_preset_night").value == "General horticulture"
-
-
-def test_inconsistent_or_unknown_preset_does_not_overwrite_saved_limits():
-    at = app_with_params({"dlo": "0.8", "dhi": "1.2", "dp": "flow", "nlo": "0.7", "nhi": "1.1", "np": "nonsense"})
-    assert not at.exception
-    s = at.session_state
-    assert (s["dn_lo_day"], s["dn_hi_day"], s["dn_lo_night"], s["dn_hi_night"]) == (0.8, 1.2, 0.7, 1.1)
-    assert s["dn_preset_day"] == "General horticulture" and s["dn_preset_night"] == "Custom"
-
-
-def test_legacy_link_keeps_day_night_defaults_and_old_presets():
-    at = app_with_params({"m": "a", "t": "25", "rh": "40", "lo": "1.2", "hi": "1.5"})
-    assert not at.exception
-    s = at.session_state
-    assert (s["dn_t_day"], s["dn_t_night"], s["dn_off_day"], s["dn_off_night"]) == (22.0, 17.0, 0.0, 0.0)
-    assert (s["dn_lo_day"], s["dn_hi_day"], s["dn_lo_night"], s["dn_hi_night"]) == (0.8, 1.2, 0.8, 1.2)
-    assert at.radio(key="dn_kind_day").value == share.AIR_LABEL
-    assert s["dn_preset_day"] == s["dn_preset_night"] == "General horticulture"
-    assert (s["vpd_lo"], s["vpd_hi"]) == (1.2, 1.5)
-
-
-@pytest.mark.parametrize("bad", [
-    {"dt": "abc", "nt": "nan", "doff": "inf", "noff": "-inf"},
-    {"dt": "999", "nt": "-999", "dlo": "-5", "nhi": "50"},
-    {"dk": "banana", "nk": "", "dp": "???", "np": "Vegetative"},
-    {"dt": "", "dlo": "1e999", "nlo": "0x10"},
-])
-def test_invalid_day_night_link_parameters_fall_back_to_defaults_without_error(bad):
-    at = app_with_params(bad)
-    assert not at.exception
-    s = at.session_state
-    assert (s["dn_t_day"], s["dn_t_night"], s["dn_off_day"], s["dn_off_night"]) == (22.0, 17.0, 0.0, 0.0)
-    assert (s["dn_lo_day"], s["dn_hi_day"], s["dn_lo_night"], s["dn_hi_night"]) == (0.8, 1.2, 0.8, 1.2)
-    assert at.radio(key="dn_kind_day").value == at.radio(key="dn_kind_night").value == share.AIR_LABEL
-
-
-def test_editing_day_night_settings_updates_url_and_leaves_other_period_and_main_untouched():
-    at = new_app().run()
-    set_num(at, "dn_t_day", 33.0)
-    set_num(at, "dn_off_day", -2.0)
-    at.radio(key="dn_kind_day").set_value(share.LEAF_LABEL).run()
-    at.selectbox(key="dn_preset_day").set_value("Vegetative").run()
-    assert (qp(at, "dt"), qp(at, "doff"), qp(at, "dk"), qp(at, "dp")) == ("33", "-2", "leaf", "veg")
-    assert (qp(at, "dlo"), qp(at, "dhi")) == ("1", "1")
-    assert (qp(at, "nt"), qp(at, "noff"), qp(at, "nk"), qp(at, "nlo"), qp(at, "nhi")) == ("17", "0", "air", "0.8", "1.2")
-    assert (qp(at, "t"), qp(at, "rh"), qp(at, "lo"), qp(at, "hi")) == ("22", "60", "0.8", "1.2")
-    set_num(at, "dn_hi_night", 1.5)
-    assert qp(at, "nhi") == "1.5" and qp(at, "np") == "custom" and qp(at, "dhi") == "1"
-    assert qp(at, "dt") == "33" and qp(at, "t") == "22"
-
-
-def test_app_url_round_trip_into_a_fresh_session():
-    at = new_app().run()
-    set_num(at, "dn_t_night", 18.5)
-    set_num(at, "dn_off_night", 1.0)
-    at.radio(key="dn_kind_night").set_value(share.LEAF_LABEL).run()
-    set_num(at, "dn_hi_night", 1.4)
-    set_num(at, "dn_lo_night", 1.4)
-    at.selectbox(key="dn_preset_day").set_value("Flowering").run()
-    link = {k: qp(at, k) for k in ("dt", "doff", "dlo", "dhi", "dk", "dp", "nt", "noff", "nlo", "nhi", "nk", "np")}
-    fresh = app_with_params(link)
-    assert not fresh.exception
-    for key in ("dn_t_day", "dn_off_day", "dn_lo_day", "dn_hi_day", "dn_preset_day", "dn_kind_day",
-                "dn_t_night", "dn_off_night", "dn_lo_night", "dn_hi_night", "dn_preset_night", "dn_kind_night"):
-        assert fresh.session_state[key] == at.session_state[key], key
-    assert fresh.selectbox(key="dn_preset_day").value == "Flowering"
-    assert fresh.selectbox(key="dn_preset_night").value == "Custom"
-
-
 def test_calculator_has_no_csv_json_or_share_section():
     at = new_app().run()
     calc = at.tabs[0]
@@ -645,19 +411,6 @@ def test_calculator_has_no_csv_json_or_share_section():
     labels = [getattr(b.proto, "label", "") for b in at.get("download_button")]
     assert not any("settings and results" in x or "setup (JSON)" in x for x in labels)
     assert "Download comparison (CSV)" in labels and "Download grid (CSV)" in labels
-
-
-def test_acceptable_range_has_one_copy_link_control_that_follows_edits():
-    at = new_app().run()
-    comps = {c.proto.component_name: json.loads(c.proto.json) for c in at.get("bidi_component")}
-    assert "Share your current settings." in [c.value for c in at.tabs[1].caption]
-    url = comps["vpd_copy_link"]["url"]
-    assert url == share.share_url(at.session_state) and "nt=17" in url
-    set_num(at, "dn_t_night", 14.0)
-    at.radio(key="dn_kind_night").set_value(share.LEAF_LABEL).run()
-    url = json.loads([c for c in at.get("bidi_component") if c.proto.component_name == "vpd_copy_link"][0].proto.json)["url"]
-    assert "nt=14" in url and "nk=leaf" in url
-    assert not any("?" in x.value and "http" in x.value for x in at.code)           # the URL itself is not displayed
 
 
 # ---- heatmap settings in shareable links -----------------------------------------------------------
@@ -699,9 +452,9 @@ def test_heatmap_link_restores_controls_and_chart_alongside_other_settings():
     s = at.session_state
     assert (s["t_air"], s["rh"], s["vpd_lo"], s["vpd_hi"], s["calc_offset"]) == (25.0, 40.0, 0.9, 1.3, -2.0)
     assert s["interval_kind"] == share.LEAF_LABEL
-    assert (s["dn_t_day"], s["dn_off_day"], s["dn_kind_day"], s["dn_preset_day"]) == (
-        33.0, -2.0, share.LEAF_LABEL, "Vegetative")
-    assert (s["dn_t_night"], s["dn_hi_night"], s["dn_kind_night"]) == (17.0, 1.0, share.AIR_LABEL)
+    assert (s["dn_lo_day"], s["dn_hi_day"], s["dn_kind_day"], s["range_preset"]) == (
+        1.0, 1.0, share.LEAF_LABEL, presets.CUSTOM)
+    assert (s["dn_lo_night"], s["dn_hi_night"], s["dn_kind_night"]) == (0.6, 1.0, share.AIR_LABEL)
 
 
 def test_heatmap_toggles_on_restore_target_and_point_layers():
@@ -720,20 +473,20 @@ def test_app_url_round_trip_of_heatmap_settings_into_a_fresh_session():
     at.number_input(key="hm_zmax").set_value(4.0).run()
     at.checkbox(key="hm_point").set_value(False).run()
     set_num(at, "t_air", 27.0)
-    set_num(at, "dn_t_night", 15.5)
+    set_num(at, "dn_lo_night", 0.55)
     link = {k: qp(at, k) for k in at.query_params}
     assert {"hk", "htmin", "htmax", "hrmin", "hrmax", "hz", "hcs", "hst", "hg", "hp"} <= set(link)
     fresh = app_with_params(link)
     assert not fresh.exception
     for key in ("hm_kind", "hm_tmin", "hm_tmax", "hm_rhmin", "hm_rhmax", "hm_cs", "hm_step", "hm_zmax",
-                "hm_target", "hm_point", "t_air", "dn_t_night"):
+                "hm_target", "hm_point", "t_air", "dn_lo_night"):
         assert fresh.session_state[key] == at.session_state[key], key
     assert heatmap_spec(fresh)["layout"] == heatmap_spec(at)["layout"]
 
 
 def test_editing_heatmap_settings_updates_url_without_touching_other_settings():
     at = new_app().run()
-    before = {k: qp(at, k) for k in ("t", "rh", "dt", "nt", "dlo", "nhi")}
+    before = {k: qp(at, k) for k in ("t", "rh", "nlo", "dlo", "nhi")}
     at.selectbox(key="hm_cs").set_value("Plasma").run()
     at.checkbox(key="hm_target").set_value(False).run()
     assert qp(at, "hcs") == "Plasma" and qp(at, "hg") == "0"
@@ -932,7 +685,7 @@ def test_compare_table_edits_add_invalid_rows_and_stay_independent(monkeypatch):
     assert any("Broken" in e and "Relative humidity missing" in e for e in errors)
     assert any("Example A" in w.value and "condensation" in w.value for w in at.warning)  # saturated air, leaf 3 degC cooler
     # settings of the other tabs are untouched; rows survive a plain rerun
-    assert at.session_state["t_air"] == 28.0 and at.session_state["dn_t_day"] == 22.0 and at.session_state["hm_tmin"] == 10.0
+    assert at.session_state["t_air"] == 28.0 and at.session_state["dn_lo_day"] == 0.7 and at.session_state["hm_tmin"] == 10.0
     at.run()
     assert compare_results(at)[treat.NAME].tolist()[-2:] == ["Cold", "Broken"] and b"Cold" in calls[-1]
     at.session_state["cmp_editor"] = {"edited_rows": {}, "added_rows": [], "deleted_rows": [0, 1]}
@@ -1026,3 +779,108 @@ def test_prepared_figure_downloads_follow_the_comparison_treatments_and_toggle(m
     assert heatmap_downloads(at) == set()                                                     # hidden -> stale
     at.button(key="png_prepare").click().run()
     assert "Renamed" not in calls["Download SVG"]["data"].decode("utf-8")                    # no markers when hidden
+
+
+# ---- acceptable range: presets, shared conditions, reset ----------------------------------------------------
+def panel_payloads(at):
+    return [json.loads(c.proto.json) for c in at.get("bidi_component") if c.proto.component_name == "vpd_live_calculator"]
+
+
+def limits(at):
+    s = at.session_state
+    return (s["dn_lo_day"], s["dn_hi_day"]), (s["dn_lo_night"], s["dn_hi_night"])
+
+
+def test_range_tab_only_edits_ranges_and_has_one_preset_selector():
+    at = new_app().run()
+    tab = at.tabs[1]
+    assert [w.key for w in tab.selectbox] == ["range_preset__w"] and tab.selectbox[0].label == "Range preset"
+    assert tab.selectbox[0].options == presets.PRESET_NAMES and tab.selectbox[0].value == presets.DEFAULT_PRESET
+    assert sorted(w.key for w in tab.number_input) == ["dn_hi_day__num", "dn_hi_night__num", "dn_lo_day__num", "dn_lo_night__num"]
+    assert not any(w.key.startswith(("dn_t_", "dn_off_")) for w in tab.number_input)
+    assert not tab.metric and not tab.info
+    assert limits(at) == ((0.7, 1.3), (0.7, 1.3))
+    assert "Uses the current Calculator conditions." in [c.value for c in tab.caption]
+    assert any(e.label == "About these ranges" for e in at.expander) and any(e.label == "About night-time VPD" for e in at.expander)
+
+
+def test_preset_sets_both_periods_manual_edit_changes_one_and_new_preset_resets_both():
+    at = new_app().run()
+    name = presets.PRESET_NAMES[3]                                           # ASHRAE leafy greens, 0.65-0.90
+    at.selectbox(key="range_preset__w").set_value(name).run()
+    assert limits(at) == ((0.65, 0.9), (0.65, 0.9)) and at.session_state["range_preset"] == name
+    set_num(at, "dn_hi_night", 1.1)
+    assert limits(at) == ((0.65, 0.9), (0.65, 1.1)) and at.selectbox(key="range_preset__w").value == presets.CUSTOM
+    at.run()                                                                  # reruns do not re-apply a preset
+    assert limits(at) == ((0.65, 0.9), (0.65, 1.1))
+    at.selectbox(key="range_preset__w").set_value(presets.CUSTOM).run()      # Custom keeps the bounds
+    assert limits(at) == ((0.65, 0.9), (0.65, 1.1))
+    at.selectbox(key="range_preset__w").set_value(presets.PRESET_NAMES[6]).run()
+    assert limits(at) == ((0.8, 1.2), (0.8, 1.2))
+
+
+def test_changing_bounds_does_not_change_calculator_conditions_and_panels_match():
+    at = new_app().run()
+    before = live_values(at)
+    set_num(at, "dn_lo_day", 0.9)
+    set_num(at, "dn_hi_day", 0.9)                                             # equal bounds are supported
+    assert live_values(at) == before
+    cal, rng = [(p["target"], p["inputs"], p["mode"]) for p in panel_payloads(at)]
+    assert cal == rng and cal[0] == {"lo": 0.9, "hi": 0.9, "kind": "air", "period": "Day"}
+    assert [p.get("readonly") for p in panel_payloads(at)] == [None, True]
+    at.radio(key="calc_period__r").set_value("Night").run()                  # period is mirrored between the tabs
+    assert at.radio(key="calc_period").value == "Night"
+    assert all(p["target"]["period"] == "Night" for p in panel_payloads(at))
+    at.radio(key="mode").set_value(share.MODE_B).run()
+    assert all(p["mode"] == "b" for p in panel_payloads(at))
+
+
+def test_range_settings_survive_reruns_and_link_round_trip():
+    at = new_app().run()
+    at.selectbox(key="range_preset__w").set_value(presets.PRESET_NAMES[5]).run()
+    set_num(at, "dn_lo_night", 0.5)
+    link = {k: qp(at, k) for k in at.query_params}
+    assert link["rp"] == "custom" and link["nlo"] == "0.5" and link["dlo"] == "0.4" and not {"dt", "nt", "doff", "noff"} & set(link)
+    fresh = app_with_params(link)
+    assert limits(fresh) == ((0.4, 0.8), (0.5, 0.8)) and fresh.session_state["range_preset"] == presets.CUSTOM
+    same = app_with_params({"dlo": "0.4", "dhi": "0.8", "nlo": "0.4", "nhi": "0.8", "rp": "bayer"})
+    assert same.session_state["range_preset"] == presets.PRESET_NAMES[5]
+
+
+def test_obsolete_day_night_condition_parameters_do_not_override_calculator():
+    at = app_with_params(ACCEPTANCE | OBSOLETE | {"t": "25", "rh": "40", "off": "-2"})
+    assert not at.exception
+    assert live_values(at) == {"rh": 40.0, "t_air": 25.0, "calc_offset": -2.0} and "dn_t_day" not in at.session_state
+    assert limits(at) == ((1.0, 1.0), (0.6, 1.0))
+    bad = app_with_params({"dlo": "abc", "nhi": "99", "rp": "nonsense"})
+    assert not bad.exception and limits(bad) == ((0.7, 1.3), (0.7, 1.3)) and bad.session_state["range_preset"] == presets.DEFAULT_PRESET
+
+
+def test_reset_restores_calculator_defaults_and_keeps_ranges():
+    at = new_app().run()
+    at.selectbox(key="range_preset__w").set_value(presets.PRESET_NAMES[4]).run()
+    at.radio(key="mode").set_value(share.MODE_B).run()
+    at.radio(key="calc_leaf_method").set_value(share.MEASURED_METHOD).run()
+    set_num(at, "t_air", 31.0)
+    set_num(at, "calc_leaf_meas", 27.0)
+    set_num(at, "calc_offset", 0.5)
+    set_num(at, "target_vpd", 2.0)
+    at.radio(key="calc_period").set_value("Night").run()
+    at.button(key="calc_reset").click().run()
+    assert not at.exception
+    assert at.radio(key="mode").value == share.MODE_A and at.radio(key="calc_leaf_method").value == share.OFFSET_METHOD
+    assert live_values(at) == {"rh": 60.0, "t_air": 22.0, "calc_offset": -1.0}
+    assert at.session_state["calc_leaf_meas"] == 22.0
+    assert at.session_state["target_vpd"] == vpd.calculate_vpd(22.0, 60.0, -1.0).vpd_leaf
+    assert limits(at) == ((1.0, 1.4), (1.0, 1.4)) and at.session_state["range_preset"] == presets.PRESET_NAMES[4]
+    assert at.radio(key="calc_period").value == "Night"
+    assert panel_payloads(at)[0]["epoch"] == 1 and (qp(at, "t"), qp(at, "rh"), qp(at, "off")) == ("22", "60", "-1")
+
+
+def test_copy_link_reflects_latest_range_edits_and_the_url_is_not_shown():
+    at = new_app().run()
+    set_num(at, "dn_lo_night", 0.55)
+    url = json.loads([c for c in at.get("bidi_component") if c.proto.component_name == "vpd_copy_link"][0].proto.json)["url"]
+    assert url == share.share_url(at.session_state) and "nlo=0.55" in url
+    assert "Share your current settings." in [c.value for c in at.tabs[1].caption]
+    assert not any("?" in x.value and "http" in x.value for x in at.code)

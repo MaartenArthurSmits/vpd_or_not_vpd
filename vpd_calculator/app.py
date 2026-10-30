@@ -57,9 +57,7 @@ DEFAULTS = {
     "t_air": 22.0, "rh": 60.0, "target_vpd": 1.0,
     "calc_offset": -1.0, "calc_leaf_meas": 22.0,
     "vpd_lo": 0.8, "vpd_hi": 1.2,            # legacy: kept so old links/setups load; the Calculator no longer uses them
-    "dn_t_day": 22.0, "dn_t_night": 17.0,
-    "dn_off_day": 0.0, "dn_off_night": 0.0,
-    "dn_lo_day": 0.8, "dn_hi_day": 1.2, "dn_lo_night": 0.8, "dn_hi_night": 1.2,
+    "dn_lo_day": 0.7, "dn_hi_day": 1.3, "dn_lo_night": 0.7, "dn_hi_night": 1.3,   # default: Lopez et al. (2026)
 }
 for k, v in DEFAULTS.items():
     st.session_state.setdefault(k, v)
@@ -67,12 +65,10 @@ for k, v in DEFAULTS.items():
 
 
 def derive_preset_state():
-    """Preset selectors follow the (already restored) numerical settings; saved identities are kept."""
-    for _p in ("day", "night"):
-        st.session_state[f"dn_preset_{_p}"] = presets.resolve_stage(
-            st.session_state.get(f"dn_preset_{_p}"),          # saved identity from the link/setup, if any
-            st.session_state[f"dn_lo_{_p}"], st.session_state[f"dn_hi_{_p}"], _p)
-        st.session_state[f"dn_offset_preset_{_p}"] = presets.match_offset_preset(st.session_state[f"dn_off_{_p}"])
+    """The range-preset selector follows the (already restored) limits; a saved identity is kept when it still fits."""
+    s = st.session_state
+    s["range_preset"] = presets.resolve_preset(
+        s.get("range_preset"), (s["dn_lo_day"], s["dn_hi_day"]), (s["dn_lo_night"], s["dn_hi_night"]))
 
 
 # Settings from a shared link are applied once, at the start of the session.
@@ -105,23 +101,6 @@ def linked(label, key, lo, hi, step, fmt="%.1f", num_min=None, num_max=None, hel
     st.slider(label, float(lo), float(hi), step=step, format=fmt, key=sld, on_change=from_sld,
               label_visibility="collapsed")
     return float(st.session_state[key])
-
-
-def offset_widget(label, key, preset_key):
-    """Leaf-offset preset selector plus a free (custom) numeric input."""
-    def pick():
-        v = presets.offset_from_label(st.session_state[preset_key])
-        if v is not None:
-            st.session_state[key] = v
-
-    def edited():
-        st.session_state[preset_key] = presets.match_offset_preset(st.session_state[key])
-
-    st.session_state.setdefault(preset_key, presets.match_offset_preset(st.session_state[key]))
-    st.selectbox("Leaf offset scenario", presets.LEAF_OFFSET_NAMES, key=preset_key, on_change=pick,
-                 help="Illustrative scenarios, not universal correction factors.")
-    return linked(label, key, -10.0, 10.0, 0.1, after=edited,
-                  help="Leaf temperature minus air temperature.")
 
 
 FIG4_PATH = Path(__file__).parent / "assets" / "nelson_bugbee_2015_fig4.png"
@@ -232,7 +211,19 @@ with tab_calc:
         st.info(st.session_state["_sync_note"])
     mode_a = mode == share.MODE_A
 
-    o1, o3 = st.columns(2, gap="large")
+    def reset_calculator():
+        """Restore the Calculator's own conditions (the acceptable ranges are kept)."""
+        s = st.session_state
+        s.update({k: DEFAULTS[k] for k in ("t_air", "rh", "calc_offset", "calc_leaf_meas")})
+        s["mode"], s["calc_leaf_method"] = share.MODE_A, share.OFFSET_METHOD
+        s["target_vpd"] = vpd.calculate_vpd(DEFAULTS["t_air"], DEFAULTS["rh"], DEFAULTS["calc_offset"]).vpd_leaf
+        s["_calc_epoch"] = s.get("_calc_epoch", 0) + 1            # tells the live component to drop unsent edits
+        s.pop("_sync_note", None)
+
+    o1, o3, o4 = st.columns([3, 3, 2], gap="large")
+    with o4:
+        st.write("")
+        st.button("Reset calculator", key="calc_reset", on_click=reset_calculator)
     with o1:
         leaf_method = st.radio("Leaf temperature input", [share.OFFSET_METHOD, share.MEASURED_METHOD],
                                key="calc_leaf_method", horizontal=True)
@@ -269,11 +260,10 @@ with tab_calc:
             if key in live_bounds and live_bounds[key][0] <= float(value) <= live_bounds[key][1]:
                 st.session_state[key] = float(value)
 
-    live_calculator.live_calculator(
-        {"mode": "a" if mode_a else "b", "leafMethod": "measured" if measured_in else "offset",
-         "target": {"lo": lo, "hi": hi, "kind": ikind, "period": period} if interval_ok else None,
-         "inputs": live_inputs},
-        commit_live_values)
+    calc_payload = {"mode": "a" if mode_a else "b", "leafMethod": "measured" if measured_in else "offset",
+                    "target": {"lo": lo, "hi": hi, "kind": ikind, "period": period} if interval_ok else None,
+                    "inputs": live_inputs, "epoch": st.session_state.get("_calc_epoch", 0)}
+    live_calculator.live_calculator(calc_payload, commit_live_values)
 
     # Full-precision values for exports, the heatmap and links (the panel above is drawn in the browser).
     t_air = st.session_state["t_air"]
@@ -312,86 +302,91 @@ with tab_calc:
     st.query_params.from_dict(share.build_params(st.session_state))
 
 # ==========================================================================
-# Day & Night
+# Acceptable range
 # ==========================================================================
+NIGHT_NOTES = """
+Night-time humidity management should avoid prolonged humid conditions and condensation. Runkle (2022)
+recommends maintaining air VPD above 0.3 kPa when managing cooler nights, but gives no upper night-time limit
+([Runkle, *Pros and Cons of Cool Nights*](https://www.canr.msu.edu/floriculture/uploads/files/Cool%20nights.pdf)).
+
+Make environmental transitions gradually, particularly when VPD increases. In a daytime strawberry study,
+Yamanaka et al. (2025) associated fruit-stalk shrinkage, an indicator of water stress, with rising air VPD. Their
+model identified a threshold of 0.069 hPa/min = 0.0069 kPa/min, approximately 0.41 kPa/hour, at VPD of 0.8 kPa or
+higher. This is a study-specific finding, not a universal transition-speed limit or a night-time recommendation
+([Yamanaka et al., 2025](https://doi.org/10.2503/hortj.SZD-015)).
+
+This calculator initially uses the same range for day and night as an editable starting point. Equipment
+constraints may require different night settings. Adjust them for the crop and growing conditions while
+monitoring humidity and condensation.
+
+MSU reports a tomato study in which 0.8 kPa during both day and night performed better than 0.5 kPa throughout.
+This supports that particular treatment comparison, not a universal benefit from equal day/night VPD
+([Wollaeger & Runkle (2015), MSU Extension](https://msu-prod.dotcmscloud.com/news/why_should_greenhouse_growers_pay_attention_to_vapor_pressure_deficit_and_n)).
+"""
+
 with tab_daynight:
-    # ---- Day and night ranges (stacked) ---------------------------------------
     st.subheader("Acceptable range")
-    st.caption("Configure the day and night conditions independently. The required RH range is calculated "
-               "at each period's own temperature and optional leaf offset. Presets are illustrative. "
-               "The Calculator compares its current VPD with the Day or Night range set here.")
-    live_calculator.copy_link_button(share.share_url(st.session_state))
-    st.caption("Share your current settings.")
+
+    def apply_range_preset():
+        """Preset selection: both periods take the preset's limits (Custom keeps the current ones)."""
+        name = st.session_state["range_preset__w"]
+        st.session_state["range_preset"] = name
+        if name in presets.RANGE_PRESETS:
+            a, b = presets.preset_range(name)
+            for p_ in ("day", "night"):
+                st.session_state[f"dn_lo_{p_}"], st.session_state[f"dn_hi_{p_}"] = a, b
+
+    def range_edited():
+        st.session_state["range_preset"] = presets.CUSTOM
+
+    st.session_state["range_preset__w"] = st.session_state["range_preset"]
+    st.selectbox("Range preset", presets.PRESET_NAMES, key="range_preset__w", on_change=apply_range_preset)
+    chosen = st.session_state["range_preset"]
+    if chosen in presets.RANGE_PRESETS:
+        a_, b_ = presets.preset_range(chosen)
+        st.caption(f"{a_:.2f}–{b_:.2f} kPa for both periods. Source: {presets.RANGE_PRESETS[chosen]['source']}")
+    else:
+        st.caption("Edit the Day and Night limits below; the current limits are kept.")
+    with st.expander("About these ranges"):
+        st.markdown(presets.ABOUT_RANGES)
+        st.markdown("Runkle (2021) describes subjective classifications. The strawberry range is cited by Yamanaka "
+                    "et al. (2025) from Lieten (2002), not independently established by their experiment. "
+                    "Edit the limits for your crop and conditions.")
 
     def period_section(period: str):
-        p = period.lower()
-
-        def apply_preset():
-            name = st.session_state[f"dn_preset_{p}"]
-            if name in presets.GROWTH_STAGES:
-                a, b = presets.stage_range(name, p)
-                st.session_state[f"dn_lo_{p}"], st.session_state[f"dn_hi_{p}"] = a, b
-
-        def range_edited():
-            st.session_state[f"dn_preset_{p}"] = presets.match_stage(
-                st.session_state[f"dn_lo_{p}"], st.session_state[f"dn_hi_{p}"], p)
-
-        st.session_state.setdefault(f"dn_preset_{p}", presets.match_stage(
-            st.session_state[f"dn_lo_{p}"], st.session_state[f"dn_hi_{p}"], p))
+        p_ = period.lower()
         with st.container(border=True):
             st.markdown(f"### {period}")
-            a1, a2 = st.columns(2, gap="large")
-            with a1:
-                t = linked(f"{period} air temperature (°C)", f"dn_t_{p}", 0.0, 45.0, 0.1,
-                           num_min=-10.0, num_max=60.0)
-                off = offset_widget(f"{period} leaf temperature offset (°C, optional)", f"dn_off_{p}",
-                                    f"dn_offset_preset_{p}")
-            with a2:
-                st.selectbox(f"{period} growth-stage preset (illustrative)", presets.PRESET_NAMES,
-                             key=f"dn_preset_{p}", on_change=apply_preset)
-                dlo = linked(f"{period} lower limit (kPa)", f"dn_lo_{p}", 0.0, 4.0, 0.1, num_max=10.0,
+            c1, c2, c3 = st.columns(3, gap="large")
+            with c1:
+                dlo = linked(f"{period} lower limit (kPa)", f"dn_lo_{p_}", 0.0, 4.0, 0.05, fmt="%.2f", num_max=10.0,
                              after=range_edited)
-                dhi = linked(f"{period} upper limit (kPa)", f"dn_hi_{p}", 0.0, 4.0, 0.1, num_max=10.0,
+            with c2:
+                dhi = linked(f"{period} upper limit (kPa)", f"dn_hi_{p_}", 0.0, 4.0, 0.05, fmt="%.2f", num_max=10.0,
                              after=range_edited)
-                dkind = kind_from_label(st.radio(f"{period} range applies to", [share.AIR_LABEL, share.LEAF_LABEL],
-                                                 key=f"dn_kind_{p}", horizontal=True))
+            with c3:
+                st.radio(f"{period} range applies to", [share.AIR_LABEL, share.LEAF_LABEL],
+                         key=f"dn_kind_{p_}", horizontal=True)
             if dlo > dhi:
                 st.error(f"{period}: lower limit must not exceed the upper limit.")
-                return
-            d_rr = vpd.rh_range_for_vpd_range(t, dlo, dhi, dkind, off)
-            d_point = vpd.is_point_target(dlo, dhi)
-            if d_point:
-                st.markdown(f"**{period} target {dkind} VPD: {dlo:.1f} kPa**")
-            if d_rr["attainable"] and d_point:
-                st.metric(f"{period} required RH for {dkind} VPD {dlo:.1f} kPa at {t:.1f} °C",
-                          f"{d_rr['rh_min']:.1f} %")
-            elif d_rr["attainable"]:
-                st.metric(f"{period} RH range for {dkind} VPD {dlo:.1f}-{dhi:.1f} kPa at {t:.1f} °C",
-                          f"{d_rr['rh_min']:.1f} - {d_rr['rh_max']:.1f} %")
-                if not d_rr["fully_attainable"]:
-                    st.warning(f"{period}: part of the range is unattainable (unclipped RH "
-                               f"{d_rr['rh_min_raw']:.1f} to {d_rr['rh_max_raw']:.1f} %).")
-            elif d_point:
-                st.error(f"{period}: no RH between 0 and 100 % gives a {dkind} VPD of {dlo:.1f} kPa "
-                         f"(unclipped RH {d_rr['rh_min_raw']:.1f} %).")
-            else:
-                st.error(f"{period}: no RH between 0 and 100 % gives a {dkind} VPD in this range "
-                         f"(unclipped RH {d_rr['rh_min_raw']:.1f} to {d_rr['rh_max_raw']:.1f} %).")
-            rh_c = float(vpd.condensation_rh(t, t + off))
-            if off < 0:
-                msg = (f"**Condensation guidance:** with the leaf {abs(off):.1f} °C cooler than the air, leaf VPD "
-                       f"reaches 0 at {rh_c:.1f} % RH. Above that RH, condensation on the leaf is possible.")
-                if d_rr["attainable"]:
-                    msg += (f" The {'required RH' if d_point else 'top of your RH range'} ({d_rr['rh_max']:.1f} %) is "
-                            f"{'above' if d_rr['rh_max'] > rh_c else 'below'} that limit.")
-                (st.warning if d_rr["attainable"] and d_rr["rh_max"] > rh_c else st.info)(msg)
-            else:
-                st.info("**Condensation guidance:** the leaf is not cooler than the air in this scenario, so "
-                        "condensation on the leaf is not expected from the offset alone. Surfaces cooler than "
-                        "the air (for example glazing at night) can still condense moisture.")
 
     period_section("Day")
     period_section("Night")
+
+    # Same result panel as the Calculator, from the same state (display only).
+    def period_from_range_tab():
+        st.session_state["calc_period"] = st.session_state["calc_period__r"]
+
+    st.session_state["calc_period__r"] = st.session_state["calc_period"]
+    st.radio("Compare with", ["Day", "Night"], key="calc_period__r", on_change=period_from_range_tab, horizontal=True)
+    live_calculator.result_panel(dict(calc_payload, readonly=True))
+    st.caption("Uses the current Calculator conditions.")
+
+    live_calculator.copy_link_button(share.share_url(st.session_state))
+    st.caption("Share your current settings.")
+    with st.expander("About night-time VPD"):
+        st.markdown(NIGHT_NOTES)
+
 
 # ==========================================================================
 # Heatmap
@@ -512,19 +507,18 @@ with tab_methods:
 **Assumptions and behaviour**
 - The same $e_a$ (set by air temperature and RH) is used for air and leaf VPD; the leaf interior is
   assumed saturated at leaf temperature.
-- Leaf temperature is either air temperature plus an offset, or a directly measured value. Offset presets
-  (0, -1, -2, +1, +2 °C) are illustrative scenarios, not universal correction factors.
+- Leaf temperature is either air temperature plus an offset, or a directly measured value. Offsets are
+  estimates, not universal correction factors.
 - Required RH outside 0-100 % is reported as unattainable, never clipped.
 - Negative leaf VPD is allowed and flagged, since it indicates possible condensation on the leaf.
 - The FAO-56 equation is an empirical formula in air temperature only; it does not use atmospheric pressure. Results far outside typical growth-chamber temperatures have not been checked here.
-- Growth-stage VPD presets are illustrative horticultural ranges from a grower guide (Koverda, 2020). They are
-  **not** scientifically validated, species-specific optima. Custom ranges are yours to define.
+- Range presets adapt published VPD guidance into editable starting ranges (see the references below). Some
+  sources report air VPD; the values are **not** validated canopy-VPD optima. Custom ranges are yours to define.
 - The leaf-offset heatmap uses a constant offset across all air temperatures.
 - Values are displayed with one decimal place for readability; calculations, validation tables and CSV
   exports keep full precision.
 
-**Attribution.** Pulse Grow (Koverda, 2020) is the source of the illustrative growth-stage VPD ranges and the
-typical leaf-offset note, and the inspiration for the interface. It is not the source of the equations; those
+**Attribution.** Pulse Grow (Koverda, 2020) inspired the interface. It is not the source of the equations; those
 come from FAO-56 (Allen et al., 1998).
 
 **References** (APA 7)
@@ -533,10 +527,17 @@ come from FAO-56 (Allen et al., 1998).
     st.markdown(
         """
 - Allen, R. G., Pereira, L. S., Raes, D., & Smith, M. (1998). *Crop evapotranspiration: Guidelines for computing crop water requirements* (FAO Irrigation and Drainage Paper No. 56). Food and Agriculture Organization of the United Nations. https://www.fao.org/4/x0490e/x0490e00.htm (Eq. 11: https://www.fao.org/4/x0490e/x0490e07.htm; Annex 2, Table 2.3: https://www.fao.org/4/x0490e/x0490e0j.htm)
+- ASHRAE. (2023). *ASHRAE handbook: Applications* (SI ed.), Chapter 25, §3.3 Commercial indoor farms. https://handbook.ashrae.org/Handbooks/A23/SI/A23_Ch25/a23_ch25_si.aspx
+- Bayer. (2020, February 12). *Fruit length in winter-grown cucumbers*. https://www.vegetables.bayer.com/ca/en-ca/resources/growing-tips/cultivation-insights/fruit-length-in-winter-grown-cucumbers.html
 - Garen, J. C., Crous, K. Y., Barton, C. V. M., Rymer, P. D., & Tjoelker, M. G. (2026). Joint dependence of leaf minimum conductance on vapor pressure deficit and temperature. *Plant Physiology, 201*(4), Article kiag575. https://doi.org/10.1093/plphys/kiag575
 - Grossiord, C., Buckley, T. N., Cernusak, L. A., Novick, K. A., Poulter, B., Siegwolf, R. T. W., Sperry, J. S., & McDowell, N. G. (2020). Plant responses to rising vapor pressure deficit. *New Phytologist, 226*(6), 1550–1566. https://doi.org/10.1111/nph.16485
 - Johnston, M. R., Barnes, M. L., Preisler, Y., Smith, W. K., Biederman, J. A., Scott, R. L., Williams, A. P., & Dannenberg, M. P. (2025). Effects of hot versus dry vapor pressure deficit on ecosystem carbon and water fluxes. *Journal of Geophysical Research: Biogeosciences, 130*(1), Article e2024JG008146. https://doi.org/10.1029/2024JG008146
 - Koverda, P. (2020, February 12). *The ultimate vapor pressure deficit (VPD) guide*. Pulse Grow. https://pulsegrow.com/blogs/learn/vpd (illustrative growth-stage ranges, typical leaf-offset note and interface inspiration; not a source for the equations)
+- Lopez, R., Chen, P.-J., Cooley, N., & Vander Weide, J. (2026). VPD, temperature & everbearing strawberries. *Inside Grower*. https://www.inside-grower.com/Article/?articleid=28096
+- Runkle, E. S. (2021, December). Water vapor-pressure deficit. *Greenhouse Product News*, 34. https://www.canr.msu.edu/floriculture/uploads/files/Water%20VPD.pdf
+- Runkle, E. S. (2022). *Pros and cons of cool nights*. Michigan State University Extension. https://www.canr.msu.edu/floriculture/uploads/files/Cool%20nights.pdf
+- Wollaeger, H., & Runkle, E. (2015, July 30). Why should greenhouse growers pay attention to vapor-pressure deficit and not relative humidity? *MSU Extension*. https://msu-prod.dotcmscloud.com/news/why_should_greenhouse_growers_pay_attention_to_vapor_pressure_deficit_and_n
+- Yamanaka, R., Yano, T., Hikawa-Endo, M., Yoshikoshi, H., Kawashima, H., Tojo, M., & Wada, T. (2025). Relationship between vapor pressure deficit condition and water-stress status in strawberry. *The Horticulture Journal, 94*(1), 73–80. https://doi.org/10.2503/hortj.SZD-015
 """
     )
 

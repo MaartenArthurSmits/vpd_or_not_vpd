@@ -120,22 +120,17 @@ def test_day_night_target_choice_keeps_calculator_inputs(page):
     assert num(page, "Air temperature (°C)").input_value() == "22.0"
 
 
-def test_day_and_night_sections(page):
-    assert page.get_by_role("heading", name="Day", exact=True).count() == 0      # not in the Calculator tab
+def test_acceptable_range_tab_edits_limits_and_shows_the_calculator_result(page):
     open_tab(page, "Acceptable range")
-    page.get_by_role("heading", name="Day", exact=True).wait_for(timeout=TIMEOUT)
-    page.get_by_role("heading", name="Night", exact=True).wait_for(timeout=TIMEOUT)
-    assert page.get_by_role("heading", name="Day", exact=True).count() == 1
-    assert page.get_by_role("heading", name="Night", exact=True).count() == 1
-    set_number(page, "Night air temperature (°C)", 15)
-    expected = fmt_range(vpd.rh_range_for_vpd_range(15, 0.8, 1.2))
-    metric(page, "Night RH range").get_by_text(expected).wait_for(timeout=TIMEOUT)
-    assert "15.0 °C" in metric(page, "Night RH range").inner_text()
-    assert "22.0 °C" in metric(page, "Day RH range").inner_text()      # day unchanged
-    page.get_by_text("Condensation guidance").first.wait_for()
+    page.get_by_text("Range preset").first.wait_for(timeout=TIMEOUT)
+    assert num(page, "Day lower limit (kPa)").input_value() == "0.70"
+    set_number(page, "Night upper limit (kPa)", 1.1)
+    page.wait_for_function("() => [...document.querySelectorAll('input[type=number]')].some(i => i.value === '1.10')")
+    assert num(page, "Day upper limit (kPa)").input_value() == "1.30"            # the other period is unchanged
+    assert page.locator(".status").locator("visible=true").count() == 1          # the same result bar as the Calculator
     open_tab(page, "Calculator")                                                  # settings survive tab changes
     open_tab(page, "Acceptable range")
-    assert num(page, "Night air temperature (°C)").input_value().startswith("15")
+    assert num(page, "Night upper limit (kPa)").input_value() == "1.10"
 
 
 def test_heatmap_controls(page):

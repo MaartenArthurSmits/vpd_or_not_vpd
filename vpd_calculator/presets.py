@@ -1,105 +1,67 @@
-"""Illustrative horticultural VPD ranges and leaf-temperature offset scenarios.
+"""Range presets for the Acceptable range tab.
 
-IMPORTANT: these are illustrative values from a grower-oriented guide, NOT scientifically
-validated species-specific optima. They are provided only as starting points.
-
-Source for the growth-stage ranges and the typical leaf offset:
-    Koverda, P. (2020, February 12). The ultimate vapor pressure deficit (VPD) guide.
-    Pulse Grow. https://pulsegrow.com/blogs/learn/vpd
-Quoted from that page:
-    general rule 0.8-1.2 kPa; seedlings and clones "closer to 0.8 kPa" (night 0.6-1.0 kPa);
-    vegetative "around 1.0 kPa" (night 0.8-1.2 kPa); flower 1.2-1.5 kPa (night 1.0-1.5 kPa);
-    leaf temperature "typically 1-3 degC ... cooler" than air; chart default 0 degC offset.
-Where the page gives a single value for the day (seedlings, vegetative), the preset uses that
-value as both limits (zero-width range); widen it yourself if desired.
+The presets adapt published VPD guidance into editable *starting ranges*. Some sources report air VPD, and none
+of them is a validated, leaf-temperature-corrected canopy-VPD optimum. Provenance is kept in the source notes.
 """
 
 from __future__ import annotations
 
-SOURCE_APA = ("Koverda, P. (2020, February 12). *The ultimate vapor pressure deficit (VPD) guide*. "
-              "Pulse Grow. https://pulsegrow.com/blogs/learn/vpd")
-SOURCE_URL = "https://pulsegrow.com/blogs/learn/vpd"
+CUSTOM = "Custom range"
 
-CUSTOM = "Custom"
+_RUNKLE_URL = "https://www.canr.msu.edu/floriculture/uploads/files/Water%20VPD.pdf"
+_ASHRAE_URL = "https://handbook.ashrae.org/Handbooks/A23/SI/A23_Ch25/a23_ch25_si.aspx"
+# (display name, share id, lower kPa, upper kPa, source note in markdown)
+_PRESETS = [
+    ("General established plants — Lopez et al. (2026)", "lopez", 0.70, 1.30,
+     "[Lopez, Chen, Cooley & Vander Weide, *VPD, Temperature & Everbearing Strawberries*]"
+     "(https://www.inside-grower.com/Article/?articleid=28096), “Greenhouse VPD ranges.”"),
+    ("General established plants — Runkle (2021)", "runkle-mod", 0.70, 1.50,
+     f"[Runkle, *Water Vapor-Pressure Deficit*]({_RUNKLE_URL}), *Greenhouse Product News*, December 2021, p. 34, "
+     "“Moderate VPD” (a subjective classification)."),
+    ("Propagation, roots developing — Runkle (2021)", "runkle-low", 0.30, 0.70,
+     f"Same [Runkle article]({_RUNKLE_URL}), “Low VPD” (a subjective classification); applies after an initial "
+     "root system develops."),
+    ("Leafy greens and herbs, vegetative — ASHRAE (2023)", "ashrae-leafy", 0.65, 0.90,
+     f"[ASHRAE Handbook, Chapter 25]({_ASHRAE_URL}), §3.3 Commercial Indoor Farms → Design Conditions."),
+    ("Flowering and fruiting, indoor crops — ASHRAE (2023)", "ashrae-fruit", 1.00, 1.40,
+     f"Same [handbook section]({_ASHRAE_URL}); includes tomatoes and cucumbers."),
+    ("Cucumber, winter fruit production — Bayer (2020)", "bayer", 0.40, 0.80,
+     "[*Fruit Length in Winter-Grown Cucumbers*](https://www.vegetables.bayer.com/ca/en-ca/resources/"
+     "growing-tips/cultivation-insights/fruit-length-in-winter-grown-cucumbers.html), February 12, 2020, "
+     "“Regulating humidity.”"),
+    ("Strawberry, greenhouse production — Yamanaka et al. (2025)", "yamanaka", 0.80, 1.20,
+     "[Yamanaka et al., *Relationship between Vapor Pressure Deficit Condition and Water-stress Status in "
+     "Strawberry*](https://doi.org/10.2503/hortj.SZD-015), Introduction: 8–12 hPa, citing Lieten (2002); "
+     "not independently established by their experiment."),
+]
 
-# stage -> {"day": (low, high), "night": (low, high), "note": str}
-GROWTH_STAGES = {
-    "Seedlings / propagation": {
-        "day": (0.8, 0.8), "night": (0.6, 1.0),
-        "note": "Day: source gives a single value, 'closer to 0.8 kPa'. Night: 0.6-1.0 kPa."},
-    "Vegetative": {
-        "day": (1.0, 1.0), "night": (0.8, 1.2),
-        "note": "Day: source gives a single value, 'around 1.0 kPa'. Night: 0.8-1.2 kPa."},
-    "Flowering": {
-        "day": (1.2, 1.5), "night": (1.0, 1.5),
-        "note": "Day: 1.2-1.5 kPa. Night: 1.0-1.5 kPa."},
-    "General horticulture": {
-        "day": (0.8, 1.2), "night": (0.8, 1.2),
-        "note": "General rule of thumb 0.8-1.2 kPa; the source gives no separate night range."},
-}
+RANGE_PRESETS = {name: {"id": pid, "range": (lo, hi), "source": src} for name, pid, lo, hi, src in _PRESETS}
+PRESET_NAMES = list(RANGE_PRESETS) + [CUSTOM]
+DEFAULT_PRESET = _PRESETS[0][0]
+PRESET_IDS = {v["id"]: k for k, v in RANGE_PRESETS.items()} | {"custom": CUSTOM}
 
-PRESET_NAMES = list(GROWTH_STAGES) + [CUSTOM]
-
-PRESET_DISCLAIMER = (
-    "These presets are illustrative horticultural ranges from a grower guide "
-    "(Koverda, 2020; Pulse Grow). They are not scientifically validated, species-specific optima, "
-    "and no range here has been tested for any particular species or cultivar.")
-
-# Leaf temperature offset scenarios (leaf minus air, degC)
-LEAF_OFFSET_PRESETS = [0.0, -1.0, -2.0, 1.0, 2.0]
-LEAF_OFFSET_LABELS = {0.0: "0 °C (leaf = air)", -1.0: "-1 °C", -2.0: "-2 °C", 1.0: "+1 °C", 2.0: "+2 °C"}
-LEAF_OFFSET_NAMES = [LEAF_OFFSET_LABELS[v] for v in LEAF_OFFSET_PRESETS] + [CUSTOM]
-LEAF_OFFSET_DISCLAIMER = (
-    "Offsets of 0, -1, -2, +1 and +2 °C are illustrative scenarios, not universal correction factors. "
-    "Actual leaf-air temperature differences depend on species, light, airflow, humidity and "
-    "water status; measure leaf temperature (for example with an infrared thermometer) when it matters. "
-    "Koverda (2020) describes leaves as typically 1-3 °C cooler than air; positive offsets have no "
-    "source here and are included only for completeness.")
+ABOUT_RANGES = ("These presets adapt published VPD guidance into starting ranges for this calculator. Some sources "
+                "report air VPD; the values are not validated canopy-VPD optima.")
 
 
-def stage_range(stage: str, period: str = "day"):
-    return GROWTH_STAGES[stage][period]
+def preset_range(name: str):
+    return RANGE_PRESETS[name]["range"]
 
 
-def match_stage(low: float, high: float, period: str = "day") -> str:
-    """Name of the preset whose range equals (low, high), else 'Custom'.
-
-    'General horticulture' is checked first so that identical ranges resolve to the general rule.
-    """
-    order = ["General horticulture"] + [n for n in GROWTH_STAGES if n != "General horticulture"]
-    for name in order:
-        d = GROWTH_STAGES[name]
-        a, b = d[period]
-        if abs(a - low) < 1e-9 and abs(b - high) < 1e-9:
-            return name
-    return CUSTOM
+def _matches(name: str, day: tuple, night: tuple) -> bool:
+    a, b = RANGE_PRESETS[name]["range"]
+    return all(abs(a - lo) < 1e-9 and abs(b - hi) < 1e-9 for lo, hi in (day, night))
 
 
-def resolve_stage(candidate, low: float, high: float, period: str = "day") -> str:
-    """Preset to show for restored settings.
+def match_preset(day: tuple, night: tuple) -> str:
+    """First preset whose range equals both the day and night limits, else Custom."""
+    return next((name for name in RANGE_PRESETS if _matches(name, day, night)), CUSTOM)
 
-    A saved preset identity is kept when it is 'Custom' or when its range for `period` equals (low, high)
-    (this preserves which of several identical-range presets was selected). Otherwise the preset is
-    derived from the limits. The limits themselves are never changed.
-    """
+
+def resolve_preset(candidate, day: tuple, night: tuple) -> str:
+    """Preset to show for restored limits: a saved identity is kept when Custom or still matching both periods."""
     if candidate == CUSTOM:
         return CUSTOM
-    if candidate in GROWTH_STAGES:
-        a, b = GROWTH_STAGES[candidate][period]
-        if abs(a - low) < 1e-9 and abs(b - high) < 1e-9:
-            return candidate
-    return match_stage(low, high, period)
-
-
-def match_offset_preset(offset: float) -> str:
-    for v, label in LEAF_OFFSET_LABELS.items():
-        if abs(v - offset) < 1e-9:
-            return label
-    return CUSTOM
-
-
-def offset_from_label(label: str):
-    for v, lab in LEAF_OFFSET_LABELS.items():
-        if lab == label:
-            return v
-    return None
+    if candidate in RANGE_PRESETS and _matches(candidate, day, night):
+        return candidate
+    return match_preset(day, night)

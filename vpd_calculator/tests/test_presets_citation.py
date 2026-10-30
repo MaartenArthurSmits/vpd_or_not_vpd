@@ -14,49 +14,38 @@ ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
 
 
-# ---- growth-stage presets (values quoted from Koverda, 2020; Pulse Grow) -------------------
-SOURCE_VALUES = {
-    "Seedlings / propagation": {"day": (0.8, 0.8), "night": (0.6, 1.0)},
-    "Vegetative": {"day": (1.0, 1.0), "night": (0.8, 1.2)},
-    "Flowering": {"day": (1.2, 1.5), "night": (1.0, 1.5)},
-    "General horticulture": {"day": (0.8, 1.2), "night": (0.8, 1.2)},
+# ---- range presets (values quoted from the cited sources) -------------------------------------------
+EXPECTED = {
+    "General established plants — Lopez et al. (2026)": (0.70, 1.30),
+    "General established plants — Runkle (2021)": (0.70, 1.50),
+    "Propagation, roots developing — Runkle (2021)": (0.30, 0.70),
+    "Leafy greens and herbs, vegetative — ASHRAE (2023)": (0.65, 0.90),
+    "Flowering and fruiting, indoor crops — ASHRAE (2023)": (1.00, 1.40),
+    "Cucumber, winter fruit production — Bayer (2020)": (0.40, 0.80),
+    "Strawberry, greenhouse production — Yamanaka et al. (2025)": (0.80, 1.20),
 }
 
 
-def test_preset_names_and_values_match_documented_source():
-    assert presets.PRESET_NAMES == list(SOURCE_VALUES) + ["Custom"]
-    for name, vals in SOURCE_VALUES.items():
-        for period in ("day", "night"):
-            assert presets.stage_range(name, period) == vals[period]
-
-
-def test_preset_ranges_are_ordered():
-    for d in presets.GROWTH_STAGES.values():
-        for period in ("day", "night"):
-            assert d[period][0] <= d[period][1]
+def test_preset_names_values_and_default_match_the_requested_table():
+    assert presets.PRESET_NAMES == list(EXPECTED) + ["Custom range"]
+    for name, rng in EXPECTED.items():
+        assert presets.preset_range(name) == rng and rng[0] <= rng[1]
+        assert presets.RANGE_PRESETS[name]["source"].count("http") >= 1
+    assert presets.DEFAULT_PRESET == "General established plants — Lopez et al. (2026)"
 
 
 def test_preset_matching_and_custom_fallback():
-    assert presets.match_stage(1.2, 1.5) == "Flowering"
-    assert presets.match_stage(0.6, 1.0, "night") == "Seedlings / propagation"
-    assert presets.match_stage(0.9, 1.3) == "Custom"
+    assert presets.match_preset((0.8, 1.2), (0.8, 1.2)).startswith("Strawberry")
+    assert presets.match_preset((0.8, 1.2), (0.8, 1.3)) == presets.CUSTOM
 
 
-def test_preset_disclaimers_distinguish_illustrative_from_validated():
-    assert "not scientifically validated" in presets.PRESET_DISCLAIMER
-    assert "species-specific" in presets.PRESET_DISCLAIMER
-    assert "not universal correction factors" in presets.LEAF_OFFSET_DISCLAIMER
-    assert presets.SOURCE_URL == "https://pulsegrow.com/blogs/learn/vpd"
-
-
-# ---- leaf offset presets -------------------------------------------------------------------------
-def test_leaf_offset_presets_are_the_requested_set():
-    assert presets.LEAF_OFFSET_PRESETS == [0.0, -1.0, -2.0, 1.0, 2.0]
-    assert presets.LEAF_OFFSET_NAMES[-1] == "Custom" and len(presets.LEAF_OFFSET_NAMES) == 6
-    for v in presets.LEAF_OFFSET_PRESETS:
-        assert presets.offset_from_label(presets.match_offset_preset(v)) == v
-    assert presets.match_offset_preset(0.4) == "Custom"
-    assert presets.offset_from_label("Custom") is None
+def test_adaptation_statement_is_explicit_and_sources_are_in_the_references():
+    assert "not validated canopy-VPD optima" in presets.ABOUT_RANGES and "adapt published VPD guidance" in presets.ABOUT_RANGES
+    app = (ROOT / "app.py").read_text(encoding="utf-8")
+    for needle in ("Yamanaka, R.", "Lopez, R.", "Runkle, E. S. (2021", "Runkle, E. S. (2022", "Wollaeger, H.", "ASHRAE. (2023)", "Bayer. (2020"):
+        assert needle in app, needle
+    for needle in ("0.069 hPa/min = 0.0069 kPa/min", "no upper night-time limit", "not a universal transition-speed limit"):
+        assert needle in app, needle
 
 
 # ---- condensation guidance ------------------------------------------------------------------------
@@ -104,10 +93,10 @@ def public_text_files():
         yield REPO / name
 
 
-def test_no_species_specific_content_in_public_files():
+def test_no_scientific_species_names_in_public_files():
     for p in public_text_files():
         text = p.read_text(encoding="utf-8").lower()
-        for word in ("fragaria", "strawberr", "vesca"):
+        for word in ("fragaria", "vesca"):
             assert word not in text, f"{word!r} found in {p}"
 
 
