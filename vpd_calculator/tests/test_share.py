@@ -141,7 +141,7 @@ def test_build_params_before_heatmap_widgets_exist_uses_control_defaults():
     """On a fresh session the URL is built before the heatmap widgets are created (and partial links set only some)."""
     params = share.build_params(DN_STATE)
     assert {k: params[k] for k in HM_KEYS} == {
-        "htmin": "10", "htmax": "40", "hrmin": "10", "hrmax": "100", "hz": "0", "hk": "air",
+        "htmin": "10", "htmax": "40", "hrmin": "10", "hrmax": "100", "hz": "0", "hk": "leaf",
         "hcs": "RdYlBu_r", "hst": "0.5", "hg": "1", "hp": "1"}
     partial = share.build_params(DN_STATE | {"hm_tmin": 15.0})        # only one heatmap key present: no KeyError
     assert partial["htmin"] == "15" and partial["htmax"] == "40"

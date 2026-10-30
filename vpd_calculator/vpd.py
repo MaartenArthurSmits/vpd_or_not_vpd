@@ -215,12 +215,12 @@ def is_point_target(low: float, high: float) -> bool:
     return low == high
 
 
-def target_label(kind: str, low: float, high: float) -> str:
+def target_label(kind: str, low: float, high: float, decimals: int = 1) -> str:
     """Legend/plot label for a target: 'Target Air VPD 1.0 kPa' or 'Target Air VPD 0.8-1.2 kPa'."""
     name = "Air VPD" if kind == AIR else "Canopy VPD"
     if is_point_target(low, high):
-        return f"Target {name} {low:.1f} kPa"
-    return f"Target {name} {low:.1f}-{high:.1f} kPa"
+        return f"Target {name} {low:.{decimals}f} kPa"
+    return f"Target {name} {low:.{decimals}f}-{high:.{decimals}f} kPa"
 
 
 def classify_wording(position: str) -> str:

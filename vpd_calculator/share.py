@@ -139,7 +139,7 @@ def build_params(state: Mapping) -> dict:
     for q in _HEATMAP_NUMERIC:
         key = _NUMERIC[q][0]
         p[q] = _fmt(state.get(key, HEATMAP_DEFAULTS[key]))
-    p["hk"] = "air" if state.get("hm_kind", AIR_LABEL) == AIR_LABEL else "leaf"
+    p["hk"] = "air" if state.get("hm_kind", LEAF_LABEL) == AIR_LABEL else "leaf"
     p["hcs"] = state.get("hm_cs", HEATMAP_DEFAULTS["hm_cs"])
     p["hst"] = _fmt(state.get("hm_step", HEATMAP_DEFAULTS["hm_step"]))
     for q, key in _BOOL_KEYS.items():

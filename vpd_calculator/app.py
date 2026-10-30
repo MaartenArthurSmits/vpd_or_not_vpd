@@ -13,6 +13,7 @@ import live_calculator
 import mpl_export
 import plots
 import presets
+import rangecolor
 import rscript
 import share
 import validation
@@ -25,7 +26,7 @@ def _refresh_helper_modules():
     Streamlit Cloud re-runs app.py after a push but keeps already-imported helper modules in
     memory, which can leave a new app.py talking to an old module.
     """
-    for name in ("vpd", "live_calculator", "share", "presets", "citation", "validation", "plots", "mpl_export", "rscript"):
+    for name in ("vpd", "live_calculator", "rangecolor", "share", "presets", "citation", "validation", "plots", "mpl_export", "rscript"):
         mod = importlib.import_module(name)
         stamp = Path(mod.__file__).stat().st_mtime_ns
         if getattr(mod, "_loaded_stamp", None) != stamp:
@@ -83,6 +84,11 @@ _night = (st.session_state["dn_lo_night"], st.session_state["dn_hi_night"])
 _cur = st.session_state["range_preset"]
 if _cur in presets.RANGE_PRESETS and presets.resolve_preset(_cur, _day, _night) != _cur:
     st.session_state["range_preset"] = presets.CUSTOM
+
+
+st.session_state.setdefault("hm_kind", share.LEAF_LABEL)       # canopy heatmap by default; a restored Air VPD is kept
+for _k, _v in st.session_state.get("_hm_keep", {}).items():      # palette controls are hidden in range colouring
+    st.session_state.setdefault(_k, _v)
 
 
 FIG4_PATH = Path(__file__).parent / "assets" / "nelson_bugbee_2015_fig4.png"
@@ -359,10 +365,20 @@ with tab_heat:
                              format="%.1f", key="hm_rhmax")
     g1, g2, g3, g4 = st.columns(4)
     hm_kind_label = g1.radio("VPD type", [share.AIR_LABEL, share.LEAF_LABEL], key="hm_kind", horizontal=True)
-    cscale = g2.selectbox("Colour scale", plots.COLORSCALES, key="hm_cs")
+    # Range-based colouring: canopy VPD, "Highlight acceptable range" on and a valid range. It replaces the
+    # generic palette, so the palette and colour-maximum controls are hidden (their values are kept for later).
+    range_mode = (hm_kind_label == share.LEAF_LABEL and st.session_state.get("hm_target", True) and interval_ok)
+    _keep = st.session_state.setdefault("_hm_keep", {})
+    if range_mode:
+        cscale = _keep.get("hm_cs", st.session_state.get("hm_cs", "RdYlBu_r"))
+        zmax_in = _keep.get("hm_zmax", st.session_state.get("hm_zmax", 0.0))
+        st.session_state["hm_cs"], st.session_state["hm_zmax"] = cscale, zmax_in
+    else:
+        cscale = g2.selectbox("Colour scale", plots.COLORSCALES, key="hm_cs")
+        zmax_in = g4.number_input("Colour scale max (kPa, 0 = auto)", min_value=0.0, value=0.0, step=0.5,
+                                  format="%.1f", key="hm_zmax")
+        _keep["hm_cs"], _keep["hm_zmax"] = cscale, zmax_in
     cstep = g3.selectbox("Contour spacing (kPa)", [0.1, 0.2, 0.5, 1.0], index=2, key="hm_step")
-    zmax_in = g4.number_input("Colour scale max (kPa, 0 = auto)", min_value=0.0, value=0.0, step=0.5,
-                              format="%.1f", key="hm_zmax")
     o1, o2 = st.columns(2)
     show_target = o1.checkbox("Highlight acceptable range (Day or Night, as chosen in the Calculator)", value=True, key="hm_target")
     show_point = o2.checkbox("Mark selected temperature/RH", value=True, key="hm_point")
@@ -382,17 +398,19 @@ with tab_heat:
                          f"Calculator's air temperature ({t_air:.1f} °C).")
             st.caption(note)
         fig = plots.heatmap_figure(t_min, t_max, rh_min, rh_max, hm_kind, offset, cscale, cstep,
-                                   zmax_in or None, pt, tg, target_kind=ikind)
+                                   zmax_in or None, pt, tg, target_kind=ikind, range_colour=range_mode)
         st.plotly_chart(fig, width="stretch", config={"toImageButtonOptions": {"format": "png", "scale": 2}})
         if any(trace.name == vpd.ZERO_LABEL for trace in fig.data):
             st.caption("Negative canopy VPD (beyond the saturation line) indicates possible condensation.")
+        if range_mode:
+            st.caption(rangecolor.EXPLANATION)
         if tg:
             if vpd.is_point_target(lo, hi):
                 st.caption(f"Dashed contour: user-defined single-value **canopy VPD** target "
                            f"{lo:.1f} kPa (the {period} target from the Acceptable range tab; "
                            f"colours show {hm_kind} VPD).")
             else:
-                st.caption(f"Dashed contours and light overlay: user-defined **canopy VPD** target range "
+                st.caption(f"Dashed contours{'' if range_mode else ' and light overlay'}: user-defined **canopy VPD** target range "
                            f"{lo:.1f}-{hi:.1f} kPa (the {period} target from the Acceptable range tab; "
                            f"colours show {hm_kind} VPD).")
 
@@ -402,7 +420,7 @@ with tab_heat:
 
         hm_params = dict(t_min=t_min, t_max=t_max, rh_min=rh_min, rh_max=rh_max, kind=hm_kind,
                          offset=offset, colorscale=cscale, contour_step=cstep, z_max=zmax_in or None,
-                         point=pt, target=tg, target_kind=ikind)
+                         point=pt, target=tg, target_kind=ikind, range_colour=range_mode)
         leaf_t = measured if measured is not None else t_air + offset
         r_code = rscript.build_r_script(
             mode_a, t_air, st.session_state["rh"], st.session_state["target_vpd"],
@@ -412,10 +430,12 @@ with tab_heat:
                            "vpd_heatmap.R", "text/plain", key="dl_rscript",
                            help="Reproduces the calculation and this heatmap with ggplot2 (PNG and PDF export).")
 
-        sig = (t_min, t_max, rh_min, rh_max, hm_kind, round(offset, 6), cscale, cstep, zmax_in, pt, tg, ikind)
+        sig = (t_min, t_max, rh_min, rh_max, hm_kind, round(offset, 6), cscale, cstep, zmax_in, pt, tg, ikind,
+               range_mode)
         if d2.button("Prepare figure downloads", key="png_prepare"):
             export = mpl_export.heatmap_mpl(t_min, t_max, rh_min, rh_max, hm_kind, offset, cscale, cstep,
-                                            zmax_in or None, pt, tg, target_kind=ikind)
+                                            zmax_in or None, pt, tg, target_kind=ikind,
+                                            range_colour=range_mode)
             st.session_state["png"] = (sig, mpl_export.to_bytes(export, "png", 300),
                                        mpl_export.to_bytes(export, "pdf"), mpl_export.to_bytes(export, "svg"))
         cached = st.session_state.get("png")

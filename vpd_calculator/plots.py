@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
+import rangecolor
 import vpd
 
 COLORSCALES = ["RdYlBu_r", "Viridis", "Turbo", "Cividis", "Plasma", "YlGnBu", "Spectral_r", "Greys"]
@@ -14,11 +15,12 @@ COLORSCALES = ["RdYlBu_r", "Viridis", "Turbo", "Cividis", "Plasma", "YlGnBu", "S
 def heatmap_figure(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0,
                    colorscale="RdYlBu_r", contour_step=0.5, z_max=None,
                    point=None, target=None, template=None,
-                   width=None, height=650, target_kind=None) -> go.Figure:
+                   width=None, height=650, target_kind=None, range_colour=False) -> go.Figure:
     """Temperature x RH heatmap with labelled contours.
 
     point  : (t_air, rh) selected state or None
     target : (vpd_low, vpd_high) user-defined interval or None
+    range_colour : colour by distance from the target range (canopy VPD with a canopy target only; see rangecolor).
     target_kind : VPD type the target interval refers to (default: same as `kind`). The colours
                   follow `kind`; the target shading and dashed contours follow `target_kind`.
     """
@@ -31,16 +33,39 @@ def heatmap_figure(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0,
     tkind = kind if target_kind is None else target_kind
     zt = z if tkind == kind else vpd.vpd_matrix(temps, rhs, tkind, offset)
 
+    rc = bool(range_colour and kind == vpd.LEAF and target is not None and tkind == vpd.LEAF)
+    dec = 2 if rc else 1
     fig = go.Figure()
-    fig.add_trace(go.Heatmap(
-        z=z, x=temps, y=rhs, colorscale=colorscale, zmin=zmin, zmax=zmax,
-        colorbar=dict(title=dict(text=f"{label} (kPa)")),
-        hovertemplate="Temperature: %{x:.1f} °C<br>RH: %{y:.1f} %<br>"
-                      + label + ": %{z:.1f} kPa<extra></extra>",
-        name=label,
-    ))
+    if rc:      # fixed-kPa colour scale: green inside the range, warmer with distance outside; real VPD in bar/hover
+        lo_c, hi_c = target
+        cmin, cmax = rangecolor.domain(lo_c, hi_c)
+        point_t = vpd.is_point_target(lo_c, hi_c)
+        ticks = [(cmin, f"{cmin:.2f} or lower"), (lo_c, f"{lo_c:.2f} " + ("target" if point_t else "lower limit"))]
+        if not point_t:
+            ticks.append((hi_c, f"{hi_c:.2f} upper limit"))
+        ticks.append((cmax, f"{cmax:.2f} or higher"))
+        fig.add_trace(go.Heatmap(
+            z=z, x=temps, y=rhs, colorscale=[list(s) for s in rangecolor.colorscale(lo_c, hi_c)], zmin=cmin, zmax=cmax,
+            colorbar=dict(title=dict(text=f"{label} (kPa)"), tickmode="array", tickvals=[v for v, _ in ticks],
+                          ticktext=[s for _, s in ticks]),
+            hovertemplate="Temperature: %{x:.1f} °C<br>RH: %{y:.1f} %<br>" + label + ": %{z:.2f} kPa<extra></extra>",
+            name=label,
+        ))
+        for name, symbol in ((f"Within range (green)", "square"), ("Below range: VPD under the lower limit", "triangle-down"),
+                             ("Above range: VPD over the upper limit", "triangle-up")):
+            fig.add_trace(go.Scatter(x=[None], y=[None], mode="markers", name=name, showlegend=True, hoverinfo="skip",
+                                     marker=dict(symbol=symbol, size=11, color=rangecolor.GREEN if symbol == "square" else "#9e9e9e",
+                                                 line=dict(color="black", width=1))))
+    else:
+        fig.add_trace(go.Heatmap(
+            z=z, x=temps, y=rhs, colorscale=colorscale, zmin=zmin, zmax=zmax,
+            colorbar=dict(title=dict(text=f"{label} (kPa)")),
+            hovertemplate="Temperature: %{x:.1f} °C<br>RH: %{y:.1f} %<br>"
+                          + label + ": %{z:.1f} kPa<extra></extra>",
+            name=label,
+        ))
 
-    if target is not None and not vpd.is_point_target(*target):     # a single value has no band to shade
+    if not rc and target is not None and not vpd.is_point_target(*target):     # a single value has no band to shade
         lo, hi = target
         mask = np.where((zt >= lo) & (zt <= hi), 1.0, np.nan)
         fig.add_trace(go.Heatmap(
@@ -56,7 +81,7 @@ def heatmap_figure(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0,
         z=z, x=temps, y=rhs, showscale=False, hoverinfo="skip", ncontours=None,
         contours=dict(coloring="lines", showlabels=True, start=start, end=zmax,
                       size=contour_step, labelfont=dict(size=11, color="black"),
-                      labelformat=".1f"),
+                      labelformat=f".{dec}f"),
         line=dict(width=1), colorscale=[[0, "rgba(0,0,0,0.55)"], [1, "rgba(0,0,0,0.55)"]],
     ))
 
@@ -73,10 +98,10 @@ def heatmap_figure(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0,
         fig.add_trace(go.Contour(
             z=zt, x=temps, y=rhs, showscale=False, hoverinfo="skip",
             contours=dict(coloring="lines", showlabels=True, start=lo, end=hi,
-                          size=max(hi - lo, 1e-6), labelformat=".1f",   # start == end: one contour
+                          size=max(hi - lo, 1e-6), labelformat=f".{dec}f",   # start == end: one contour
                           labelfont=dict(size=12, color="black")),
             line=dict(width=3, dash="dash"), colorscale=[[0, "black"], [1, "black"]],
-            name=vpd.target_label(tkind, lo, hi), showlegend=True,
+            name=vpd.target_label(tkind, lo, hi, dec), showlegend=True,
         ))
 
     point_in_view = point is not None and t_min <= point[0] <= t_max and rh_min <= point[1] <= rh_max
@@ -84,7 +109,7 @@ def heatmap_figure(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0,
     if point_in_view:
         t, rh = point
         v = vpd.vpd_matrix([t], [rh], kind, offset)[0, 0]
-        hover = f"Selected<br>{t:.1f} °C, {rh:.1f} %<br>{label}: {v:.1f} kPa"
+        hover = f"Selected<br>{t:.1f} °C, {rh:.1f} %<br>{label}: {v:.{dec}f} kPa"
         fig.add_trace(go.Scatter(
             x=[t], y=[rh], mode="markers", name="Selected",
             marker=dict(symbol="star", size=18, color="white",

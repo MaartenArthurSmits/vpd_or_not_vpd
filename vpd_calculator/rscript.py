@@ -10,6 +10,7 @@ from datetime import date
 
 import numpy as np
 
+import rangecolor
 import vpd
 
 # app colour scale -> ggplot2 fill scale
@@ -48,9 +49,18 @@ def _heatmap_block(h: dict) -> list:
     if h.get("target") is not None:
         lo_t, hi_t = h["target"]
         subtitle_target = (("Dashed contour" if vpd.is_point_target(lo_t, hi_t) else "Dashed contours")
-                           + ": t" + vpd.target_label(tkind, lo_t, hi_t)[1:])      # "target Air VPD ..."
+                           + ": t" + vpd.target_label(tkind, lo_t, hi_t, 2 if h.get("range_colour") else 1)[1:])      # "target Air VPD ..."
     scale = _R_SCALES.get(h.get("colorscale", "RdYlBu_r"), _R_SCALES["RdYlBu_r"])
+    rc = bool(h.get("range_colour") and kind == vpd.LEAF and h.get("target") is not None and tkind == vpd.LEAF)
+    if rc:      # same fixed-kPa colour stops as the app; the colour bar shows actual canopy VPD
+        lo_c, hi_c = h["target"]
+        zlo, zhi = rangecolor.domain(lo_c, hi_c)
+        cs = rangecolor.colorscale(lo_c, hi_c)
+        scale = ("scale_fill_gradientn(colours = c(" + ", ".join(f'"{c}"' for _, c in cs) + "),\n"
+                 "                       values = c(" + ", ".join(repr(p) for p, _ in cs) + "),\n"
+                 "                       limits = zlim, oob = scales::squish, labels = function(x) sprintf(\"%.2f\", x))")
 
+    explain = ("\\n" + rangecolor.EXPLANATION) if rc else ""      # a second caption line in R
     L = [
         "",
         "# =====================================================================",
@@ -104,7 +114,8 @@ def _heatmap_block(h: dict) -> list:
         f"       title = \"{label} as a function of temperature and relative humidity\",",
         *([f"       subtitle = \"{subtitle_target}\","] if h.get("target") is not None else []),
         f"       caption = \"Saturation vapour pressure: FAO-56 (Allen et al., 1998), Eq. 11"
-        f"{'. Negative leaf VPD indicates possible condensation.' if zero_drawn else ''}\") +",
+        f"{'. Negative leaf VPD indicates possible condensation.' if zero_drawn else ''}"
+        f"{explain}\") +",
         "  theme_minimal(base_size = 12)",
         "",
         "# Optional contour labels if the metR package is available",

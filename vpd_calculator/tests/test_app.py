@@ -238,7 +238,8 @@ def test_query_params_follow_state():
 # ---- heatmap and methods tabs ---------------------------------------------------------------------------
 def test_heatmap_tab_controls_and_validation():
     at = new_app().run()
-    at.radio(key="hm_kind").set_value("Canopy VPD").run()
+    assert at.radio(key="hm_kind").value == share.LEAF_LABEL and not any(w.key == "hm_cs" for w in at.selectbox)
+    at.radio(key="hm_kind").set_value(share.AIR_LABEL).run()                 # palette controls return for the Air view
     at.selectbox(key="hm_cs").set_value("Viridis").run()
     at.number_input(key="hm_tmin").set_value(35.0).run()
     assert not at.exception
@@ -465,13 +466,15 @@ def test_heatmap_toggles_on_restore_target_and_point_layers():
 
 def test_app_url_round_trip_of_heatmap_settings_into_a_fresh_session():
     at = new_app().run()
-    at.radio(key="hm_kind").set_value(share.LEAF_LABEL).run()
+    at.radio(key="hm_kind").set_value(share.AIR_LABEL).run()
     at.number_input(key="hm_tmin").set_value(15.0).run()
     at.number_input(key="hm_rhmax").set_value(90.0).run()
     at.selectbox(key="hm_cs").set_value("Turbo").run()
     at.selectbox(key="hm_step").set_value(0.1).run()
     at.number_input(key="hm_zmax").set_value(4.0).run()
     at.checkbox(key="hm_point").set_value(False).run()
+    at.radio(key="hm_kind").set_value(share.LEAF_LABEL).run()               # canopy range colouring hides the palette controls
+    assert at.session_state["hm_cs"] == "Turbo" and at.session_state["hm_zmax"] == 4.0 and qp(at, "hcs") == "Turbo"
     set_num(at, "t_air", 27.0)
     set_num(at, "dn_lo_night", 0.55)
     link = {k: qp(at, k) for k in at.query_params}
@@ -486,6 +489,7 @@ def test_app_url_round_trip_of_heatmap_settings_into_a_fresh_session():
 
 def test_editing_heatmap_settings_updates_url_without_touching_other_settings():
     at = new_app().run()
+    at.radio(key="hm_kind").set_value(share.AIR_LABEL).run()
     before = {k: qp(at, k) for k in ("t", "rh", "nlo", "dlo", "nhi")}
     at.selectbox(key="hm_cs").set_value("Plasma").run()
     at.checkbox(key="hm_target").set_value(False).run()
@@ -494,7 +498,8 @@ def test_editing_heatmap_settings_updates_url_without_touching_other_settings():
 
 
 def test_legacy_link_keeps_heatmap_defaults():
-    at = app_with_params(ACCEPTANCE | {"t": "25"})
+    assert app_with_params({"t": "25"}).radio(key="hm_kind").value == share.LEAF_LABEL           # canopy by default
+    at = app_with_params(ACCEPTANCE | {"t": "25", "hk": "air"})                                  # restored Air is kept
     assert not at.exception
     assert at.radio(key="hm_kind").value == share.AIR_LABEL
     assert (at.number_input(key="hm_tmin").value, at.number_input(key="hm_tmax").value) == (10.0, 40.0)
@@ -512,7 +517,8 @@ def test_legacy_link_keeps_heatmap_defaults():
 def test_invalid_heatmap_link_parameters_fall_back_to_defaults_without_error(bad):
     at = app_with_params(bad)
     assert not at.exception
-    assert at.radio(key="hm_kind").value == share.AIR_LABEL
+    assert at.radio(key="hm_kind").value == share.LEAF_LABEL
+    at.radio(key="hm_kind").set_value(share.AIR_LABEL).run()
     assert (at.number_input(key="hm_tmin").value, at.number_input(key="hm_tmax").value) == (10.0, 40.0)
     assert (at.number_input(key="hm_rhmin").value, at.number_input(key="hm_rhmax").value) == (10.0, 100.0)
     assert at.number_input(key="hm_zmax").value == 0.0
@@ -522,12 +528,13 @@ def test_invalid_heatmap_link_parameters_fall_back_to_defaults_without_error(bad
 
 def test_heatmap_share_defaults_match_the_widget_defaults():
     at = new_app().run()
+    assert at.radio(key="hm_kind").value == share.LEAF_LABEL
+    at.radio(key="hm_kind").set_value(share.AIR_LABEL).run()
     widgets = {"hm_tmin": at.number_input, "hm_tmax": at.number_input, "hm_rhmin": at.number_input,
                "hm_rhmax": at.number_input, "hm_zmax": at.number_input, "hm_cs": at.selectbox,
                "hm_step": at.selectbox, "hm_target": at.checkbox, "hm_point": at.checkbox}
     for key, default in share.HEATMAP_DEFAULTS.items():
         assert widgets[key](key=key).value == default, key
-    assert at.radio(key="hm_kind").value == share.AIR_LABEL
     # a fresh session already exposes the complete heatmap parameter set in the URL
     assert {"hk", "htmin", "htmax", "hrmin", "hrmax", "hz", "hcs", "hst", "hg", "hp"} <= set(at.query_params)
 
@@ -596,6 +603,7 @@ def test_heatmap_svg_download_is_offered_with_png_and_pdf_and_follows_the_settin
     calls = capture_heatmap_downloads(monkeypatch)
     at = new_app().run()
     assert heatmap_downloads(at) == set()                                   # nothing before preparing
+    at.radio(key="hm_kind").set_value(share.AIR_LABEL).run()
     at.checkbox(key="hm_target").set_value(False).run()                     # the (canopy) target overlay is not drawn
     at.button(key="png_prepare").click().run()
     assert not at.exception and heatmap_downloads(at) == {"Download PNG", "Download PDF", "Download SVG"}
