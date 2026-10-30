@@ -9,6 +9,7 @@ import pandas as pd
 import streamlit as st
 
 import citation
+import live_calculator
 import mpl_export
 import plots
 import presets
@@ -25,7 +26,7 @@ def _refresh_helper_modules():
     Streamlit Cloud re-runs app.py after a push but keeps already-imported helper modules in
     memory, which can leave a new app.py talking to an old module.
     """
-    for name in ("vpd", "share", "presets", "citation", "validation", "plots", "mpl_export", "rscript", "treatments"):
+    for name in ("vpd", "live_calculator", "share", "presets", "citation", "validation", "plots", "mpl_export", "rscript", "treatments"):
         mod = importlib.import_module(name)
         stamp = Path(mod.__file__).stat().st_mtime_ns
         if getattr(mod, "_loaded_stamp", None) != stamp:
@@ -55,7 +56,7 @@ st.markdown(
 DEFAULTS = {
     "t_air": 22.0, "rh": 60.0, "target_vpd": 1.0,
     "calc_offset": 0.0, "calc_leaf_meas": 22.0,
-    "vpd_lo": 0.8, "vpd_hi": 1.2,
+    "vpd_lo": 0.8, "vpd_hi": 1.2,            # legacy: kept so old links/setups load; the Calculator no longer uses them
     "dn_t_day": 22.0, "dn_t_night": 17.0,
     "dn_off_day": 0.0, "dn_off_night": 0.0,
     "dn_lo_day": 0.8, "dn_hi_day": 1.2, "dn_lo_night": 0.8, "dn_hi_night": 1.2,
@@ -74,8 +75,6 @@ SETTING_DEFAULTS = DEFAULTS | share.HEATMAP_DEFAULTS | CHOICE_DEFAULTS
 
 def derive_preset_state():
     """Preset selectors follow the (already restored) numerical settings; saved identities are kept."""
-    st.session_state["vpd_preset"] = presets.match_stage(st.session_state["vpd_lo"], st.session_state["vpd_hi"])
-    st.session_state["calc_offset_preset"] = presets.match_offset_preset(st.session_state["calc_offset"])
     for _p in ("day", "night"):
         st.session_state[f"dn_preset_{_p}"] = presets.resolve_stage(
             st.session_state.get(f"dn_preset_{_p}"),          # saved identity from the link/setup, if any
@@ -157,19 +156,37 @@ def offset_widget(label, key, preset_key):
                   help="Leaf temperature minus air temperature.")
 
 
-def leaf_inputs(prefix, t_air):
-    """Returns (effective_offset, measured_or_None)."""
-    method = st.radio("Leaf temperature input", [share.OFFSET_METHOD, share.MEASURED_METHOD],
-                      key=f"{prefix}_leaf_method", horizontal=True)
-    if method == share.OFFSET_METHOD:
-        off = offset_widget("Leaf temperature offset (°C)", f"{prefix}_offset", f"{prefix}_offset_preset")
-        st.caption("Offsets are illustrative scenarios, not universal correction factors.")
-        with st.expander("About leaf-offset scenarios"):
-            st.markdown(presets.LEAF_OFFSET_DISCLAIMER)
-            st.caption("Source for the typical leaf-offset note: " + presets.SOURCE_APA)
-        return off, None
-    meas = linked("Measured leaf temperature (°C)", f"{prefix}_leaf_meas", -5.0, 50.0, 0.1)
-    return meas - t_air, meas
+FIG4_PATH = Path(__file__).parent / "assets" / "nelson_bugbee_2015_fig4.png"
+FIG4_URL = "https://doi.org/10.1371/journal.pone.0138930.g004"
+LEAF_GUIDANCE = f"""
+Some grow-equipment suppliers suggest leaf temperatures 1–3 °C below air ([Pulse](https://pulsegrow.com/blogs/learn/vpd)),
+but actual differences vary considerably: coffee leaves were measured 1–3 °C cooler in shade and 10–15 °C warmer in
+direct sun ([Butler, 1977](https://natuurtijdschriften.nl/pub/540166)). Nelson and Bugbee’s (2015)
+[Figure 4]({FIG4_URL}) illustrates how light intensity, airflow, humidity, leaf size and stomatal conductance affect
+this difference.
+
+Measure representative leaves with an infrared thermometer whenever possible; otherwise, treat the following values
+as estimates.
+"""
+LEAF_TABLE = """
+**Illustrative leaf-temperature offsets** (°C; leaf minus air):
+
+| PPFD (µmol m⁻² s⁻¹) | Rough natural-light indicator | Sunlight | Artificial lighting |
+| ---: | --- | ---: | ---: |
+| 0* | Night | −3 | −3 |
+| 250 | Overcast / shaded | −3 | −2 |
+| 500 | Cloudy | −2 | −1 |
+| 750 | Partly cloudy | −1 | 0 |
+| 1,000 | Strong direct sunlight | +0 | +1 |
+"""
+LEAF_TABLE_CAPTION = (
+    f"Simplified illustrative estimates informed by [Nelson and Bugbee (2015), Figure 4]({FIG4_URL}). The reference "
+    "figure assumes 25 °C air, 50% RH, 1 m/s airflow, 5 cm leaf width and stomatal conductance of "
+    "0.4 mol m⁻² s⁻¹. Artificial lighting combines LED and HPS into one illustrative category.\n\n"
+    "*The zero-light row is illustrative; actual night-time offsets depend on conditions. Natural-light "
+    "descriptions are rough indicators.")
+FIG4_CREDIT = (f"Figure: Nelson & Bugbee (2015), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), "
+               f"original at {FIG4_URL}. Shown unmodified.")
 
 
 def kind_from_label(label):
@@ -181,7 +198,7 @@ def to_csv(df):
 
 
 tab_calc, tab_daynight, tab_compare, tab_heat, tab_methods = st.tabs(
-    ["Calculator", "Day & Night", "Compare treatments", "VPD Heatmap", "Methods & References"])
+    ["Calculator", "Acceptable range", "Compare treatments", "VPD Heatmap", "Methods & References"])
 
 # ==========================================================================
 # Compare treatments (rendered before the Calculator tab so the setup download can read the current rows)
@@ -222,153 +239,74 @@ with tab_calc:
     mode = st.radio("Calculation mode", [share.MODE_A, share.MODE_B], key="mode", horizontal=True)
     mode_a = mode == share.MODE_A
 
-    left, right = st.columns([5, 6], gap="large")
-    with left:
-        t_air = linked("Air temperature (°C)", "t_air", 0.0, 45.0, 0.1, num_min=-10.0, num_max=60.0)
-        if mode_a:
-            rh_in = linked("Relative humidity (%)", "rh", 0.0, 100.0, 0.1)
-        else:
-            kind_label = st.radio("Target VPD refers to", ["Air VPD", "Leaf VPD"],
-                                  key="target_kind", horizontal=True)
-            tgt = linked("Target VPD (kPa)", "target_vpd", 0.0, 5.0, 0.1, num_min=-5.0, num_max=10.0)
-        offset, measured = leaf_inputs("calc", t_air)
+    o1, o2, o3 = st.columns(3, gap="large")
+    with o1:
+        leaf_method = st.radio("Leaf temperature input", [share.OFFSET_METHOD, share.MEASURED_METHOD],
+                               key="calc_leaf_method", horizontal=True)
+    with o2:
+        if not mode_a:
+            kind_label = st.radio("Target VPD refers to", ["Air VPD", "Leaf VPD"], key="target_kind", horizontal=True)
+    with o3:
+        period = st.radio("Compare with Acceptable range", ["Day", "Night"], key="calc_period", horizontal=True)
 
-    current_rh, cur_air, cur_leaf = None, None, None
-    results_row = {}
-    with right:
-        st.subheader("Results")
-        if mode_a:
-            r = vpd.calculate_vpd(t_air, rh_in, offset, measured)
-            c1, c2 = st.columns(2)
-            c1.metric("Air VPD", f"{r.vpd_air:.1f} kPa")
-            c2.metric("Leaf VPD", f"{r.vpd_leaf:.1f} kPa")
-            st.caption(f"Leaf temperature used: {r.t_leaf:.1f} °C (offset {r.t_leaf - t_air:+.1f} °C)")
-            with st.expander("Calculation details"):
-                d1, d2, d3 = st.columns(3)
-                d1.metric("Saturation vapour pressure (air)", f"{r.es_air:.1f} kPa")
-                d2.metric("Actual vapour pressure", f"{r.ea:.1f} kPa")
-                d3.metric("Saturation vapour pressure (leaf)", f"{r.es_leaf:.1f} kPa")
-            for w in r.warnings:
-                st.warning(w)
-            current_rh, cur_air, cur_leaf = rh_in, r.vpd_air, r.vpd_leaf
-            results_row = r.as_dict() | {"mode": "Calculate VPD"}
-        else:
-            res = vpd.calculate_required_rh(t_air, tgt, kind_from_label(kind_label), offset, measured)
-            if res.attainable:
-                st.metric("Required relative humidity", f"{res.rh:.1f} %")
-                c1, c2 = st.columns(2)
-                c1.metric("Resulting air VPD", f"{res.vpd_air:.1f} kPa")
-                c2.metric("Resulting leaf VPD", f"{res.vpd_leaf:.1f} kPa")
-                st.caption(f"Leaf temperature used: {res.t_leaf:.1f} °C (offset {res.t_leaf - t_air:+.1f} °C)")
-                for w in res.warnings:
-                    st.warning(w)
-                current_rh = min(max(res.rh, 0.0), 100.0)  # only tiny float-tolerance clipping
-                cur_air, cur_leaf = res.vpd_air, res.vpd_leaf
-            else:
-                st.error(res.message)
-                st.metric("Required relative humidity (not physically attainable)", f"{res.rh:.1f} %")
-            results_row = res.as_dict() | {"mode": "Calculate required RH"}
-
-    with st.expander("Air VPD vs leaf VPD: what is the difference?"):
-        st.markdown(
-            """
-**Air VPD** is the drying power of the bulk air. It is the saturation vapour pressure at *air*
-temperature minus the actual vapour pressure of the air:
-
-$$VPD_{air} = e_s(T_{air}) - e_a$$
-
-**Leaf VPD** uses the same actual vapour pressure $e_a$ but evaluates saturation at *leaf* temperature,
-because the air spaces inside a leaf are assumed to be saturated at leaf temperature:
-
-$$VPD_{leaf} = e_s(T_{leaf}) - e_a$$
-
-Leaf VPD is therefore the vapour-pressure gradient from the leaf interior to the surrounding air, which is the
-driving force for water loss. When the leaf is cooler than the air (for example because it is transpiring),
-$e_s(T_{leaf})$ is smaller, so leaf VPD is lower than air VPD. If the leaf is cool enough that
-$e_s(T_{leaf}) < e_a$, leaf VPD becomes negative and condensation on the leaf is possible.
-
-The leaf-temperature offset is an input, not a calculated quantity. Use the offset scenarios as illustrations
-only; they are not universal correction factors. Where it matters, measure leaf temperature directly.
-Grower guidance describes leaves as typically about 1-3 °C cooler than the air (Koverda, 2020); see
-Methods & References for sources and limitations.
-"""
-        )
-
-    # ---- Target VPD range ---------------------------------------------------
-    st.divider()
-    st.subheader("Target VPD range")
-
-    def apply_main_preset():
-        name = st.session_state["vpd_preset"]
-        if name in presets.GROWTH_STAGES:
-            st.session_state["vpd_lo"], st.session_state["vpd_hi"] = presets.stage_range(name, "day")
-
-    def main_range_edited():
-        st.session_state["vpd_preset"] = presets.match_stage(st.session_state["vpd_lo"], st.session_state["vpd_hi"])
-
-    st.session_state.setdefault("vpd_preset", presets.match_stage(st.session_state["vpd_lo"], st.session_state["vpd_hi"]))
-    pc1, pc2 = st.columns([1, 2], gap="large")
-    with pc1:
-        st.selectbox("Growth-stage preset (illustrative)", presets.PRESET_NAMES, key="vpd_preset",
-                     on_change=apply_main_preset)
-    with pc2:
-        stage = st.session_state["vpd_preset"]
-        if stage in presets.GROWTH_STAGES:
-            st.caption(f"**{stage}.** {presets.GROWTH_STAGES[stage]['note']}")
-        st.caption("Illustrative ranges, not scientifically validated species-specific optima.")
-        with st.expander("About the growth-stage presets"):
-            st.markdown(presets.PRESET_DISCLAIMER + " Choose 'Custom' or edit the limits to set your own range.")
-            st.caption("Source: " + presets.SOURCE_APA)
-    ic1, ic2, ic3 = st.columns([1, 1, 1], gap="large")
-    with ic1:
-        lo = linked("Lower limit (kPa)", "vpd_lo", 0.0, 4.0, 0.1, num_max=10.0, after=main_range_edited)
-    with ic2:
-        hi = linked("Upper limit (kPa)", "vpd_hi", 0.0, 4.0, 0.1, num_max=10.0, after=main_range_edited)
-    with ic3:
-        ikind_label = st.radio("Range applies to", ["Air VPD", "Leaf VPD"], key="interval_kind")
-        ikind = kind_from_label(ikind_label)
-
+    # The acceptable range of the chosen period (edited in the Acceptable range tab).
+    p = period.lower()
+    lo, hi = st.session_state[f"dn_lo_{p}"], st.session_state[f"dn_hi_{p}"]
+    ikind = kind_from_label(st.session_state.get(f"dn_kind_{p}", share.AIR_LABEL))
     interval_ok = lo <= hi
-    if not interval_ok:
-        st.error("Lower limit must not exceed the upper limit.")
+
+    measured_in = leaf_method == share.MEASURED_METHOD
+    live_inputs = [dict(key="t_air", label="Air temperature (°C)", min=0.0, max=45.0, numMin=-10.0, numMax=60.0, dec=1)]
+    if mode_a:
+        live_inputs.append(dict(key="rh", label="Relative humidity (%)", min=0.0, max=100.0, numMin=0.0, numMax=100.0, dec=1))
     else:
-        rr = vpd.rh_range_for_vpd_range(t_air, lo, hi, ikind, offset, measured)
-        s1, s2 = st.columns([1, 1], gap="large")
-        with s1:
-            cur = None if current_rh is None else (cur_air if ikind == vpd.AIR else cur_leaf)
-            if cur is None:
-                st.info("Current conditions are not available (target VPD is unattainable).")
-            else:
-                pos = vpd.classify_vpd(cur, lo, hi)
-                txt = f"Current {ikind} VPD = {cur:.1f} kPa"
-                if vpd.is_point_target(lo, hi):
-                    msg = f"{txt}: {vpd.classify_wording(pos)} ({lo:.1f} kPa)."
-                    (st.success if pos == "inside" else st.warning)(msg)
-                elif pos == "inside":
-                    st.success(f"{txt}: inside the range {lo:.1f}-{hi:.1f} kPa.")
-                else:
-                    st.warning(f"{txt}: {pos} the range {lo:.1f}-{hi:.1f} kPa.")
-            if vpd.is_point_target(lo, hi):
-                st.markdown(f"**Target {ikind} VPD: {lo:.1f} kPa**")
-            if rr["attainable"] and vpd.is_point_target(lo, hi):
-                st.metric(f"Required RH for {ikind} VPD {lo:.1f} kPa at {t_air:.1f} °C",
-                          f"{rr['rh_min']:.1f} %")
-            elif rr["attainable"]:
-                st.metric(f"RH range for {ikind} VPD {lo:.1f}-{hi:.1f} kPa at {t_air:.1f} °C",
-                          f"{rr['rh_min']:.1f} - {rr['rh_max']:.1f} %")
-                if not rr["fully_attainable"]:
-                    st.warning(
-                        f"Part of the range is unattainable: unclipped RH range is "
-                        f"{rr['rh_min_raw']:.1f} to {rr['rh_max_raw']:.1f} %. Showing the attainable part.")
-            elif vpd.is_point_target(lo, hi):
-                st.error(f"No RH between 0 and 100 % gives a {ikind} VPD of {lo:.1f} kPa "
-                         f"(unclipped RH {rr['rh_min_raw']:.1f} %).")
-            else:
-                st.error(f"No RH between 0 and 100 % gives a {ikind} VPD in this range "
-                         f"(unclipped RH {rr['rh_min_raw']:.1f} to {rr['rh_max_raw']:.1f} %).")
-        with s2:
-            st.plotly_chart(plots.vpd_vs_rh_figure(t_air, offset, ikind, rh_range=rr, point_rh=current_rh),
-                            width="stretch")
+        live_inputs.append(dict(key="target_vpd", label="Target VPD (kPa)", min=0.0, max=5.0, numMin=-5.0, numMax=10.0, dec=2))
+    if measured_in:
+        live_inputs.append(dict(key="calc_leaf_meas", label="Measured leaf temperature (°C)", min=-5.0, max=50.0,
+                                numMin=-5.0, numMax=50.0, dec=1))
+    else:
+        live_inputs.append(dict(key="calc_offset", label="Leaf temperature offset (°C, leaf minus air)", min=-10.0,
+                                max=10.0, numMin=-10.0, numMax=10.0, dec=1))
+    for f in live_inputs:
+        f.update(step=0.1, value=float(st.session_state[f["key"]]))
+    live_bounds = {f["key"]: (f["numMin"], f["numMax"]) for f in live_inputs}
+
+    def commit_live_values():
+        """Store the values committed in the live component (release / Enter) as the canonical settings."""
+        committed = (st.session_state.get("calc_live") or {}).get("values") or {}
+        for key, value in committed.items():
+            if key in live_bounds and live_bounds[key][0] <= float(value) <= live_bounds[key][1]:
+                st.session_state[key] = float(value)
+
+    live_calculator.live_calculator(
+        {"mode": "a" if mode_a else "b", "leafMethod": "measured" if measured_in else "offset",
+         "targetKind": "air" if mode_a or kind_label == share.AIR_LABEL else "leaf",
+         "target": {"lo": lo, "hi": hi, "kind": ikind, "period": period} if interval_ok else None,
+         "inputs": live_inputs},
+        commit_live_values)
+
+    # Full-precision values for exports, the heatmap and links (the panel above is drawn in the browser).
+    t_air = st.session_state["t_air"]
+    measured = st.session_state["calc_leaf_meas"] if measured_in else None
+    offset = st.session_state["calc_leaf_meas"] - t_air if measured_in else st.session_state["calc_offset"]
+    if mode_a:
+        r = vpd.calculate_vpd(t_air, st.session_state["rh"], offset, measured)
+        current_rh = st.session_state["rh"]
+        results_row = r.as_dict() | {"mode": "Calculate VPD"}
+    else:
+        res = vpd.calculate_required_rh(t_air, st.session_state["target_vpd"], kind_from_label(kind_label),
+                                        offset, measured)
+        current_rh = min(max(res.rh, 0.0), 100.0) if res.attainable else None   # only tiny float-tolerance clipping
+        results_row = res.as_dict() | {"mode": "Calculate required RH"}
+
+    with st.expander("Leaf-temperature guidance"):
+        st.markdown(LEAF_GUIDANCE)
+        st.markdown(LEAF_TABLE)
+        st.caption(LEAF_TABLE_CAPTION)
+        st.image(str(FIG4_PATH), width=640, caption="Fig. 4. Calculated effects of environmental conditions on the difference "
+                 "between leaf temperature and air temperature under four radiation scenarios.")
+        st.caption(FIG4_CREDIT)
+
 
 
     # ---- Export current settings --------------------------------------------
@@ -419,9 +357,10 @@ Methods & References for sources and limitations.
 # ==========================================================================
 with tab_daynight:
     # ---- Day and night ranges (stacked) ---------------------------------------
-    st.subheader("Day and night target VPD ranges")
+    st.subheader("Acceptable range")
     st.caption("Configure the day and night conditions independently. The required RH range is calculated "
-               "at each period's own temperature and optional leaf offset. Presets are illustrative.")
+               "at each period's own temperature and optional leaf offset. Presets are illustrative. "
+               "The Calculator compares its current VPD with the Day or Night range set here.")
 
     def period_section(period: str):
         p = period.lower()
@@ -512,7 +451,7 @@ with tab_heat:
     zmax_in = g4.number_input("Colour scale max (kPa, 0 = auto)", min_value=0.0, value=0.0, step=0.5,
                               format="%.1f", key="hm_zmax")
     o1, o2 = st.columns(2)
-    show_target = o1.checkbox("Highlight target range from Calculator tab", value=True, key="hm_target")
+    show_target = o1.checkbox("Highlight acceptable range (Day or Night, as chosen in the Calculator)", value=True, key="hm_target")
     show_point = o2.checkbox("Mark selected temperature/RH", value=True, key="hm_point")
     show_treatments = st.checkbox("Show comparison treatments", value=False, key="hm_treatments",
                                   help="Markers for the valid rows of the Compare treatments tab.")
@@ -552,11 +491,11 @@ with tab_heat:
         if tg:
             if vpd.is_point_target(lo, hi):
                 st.caption(f"Dashed contour: user-defined single-value target **{ikind} VPD** "
-                           f"{lo:.1f} kPa (set by 'Range applies to' on the Calculator tab; "
+                           f"{lo:.1f} kPa (the {period} target from the Acceptable range tab; "
                            f"colours show {hm_kind} VPD).")
             else:
                 st.caption(f"Dashed contours and light overlay: user-defined target **{ikind} VPD** range "
-                           f"{lo:.1f}-{hi:.1f} kPa (set by 'Range applies to' on the Calculator tab; "
+                           f"{lo:.1f}-{hi:.1f} kPa (the {period} target from the Acceptable range tab; "
                            f"colours show {hm_kind} VPD).")
 
         d1, d2, d3 = st.columns(3)

@@ -53,35 +53,55 @@ def fmt_range(rr):
     return f"{rr['rh_min']:.1f} - {rr['rh_max']:.1f} %"
 
 
+def result(page, name="primary"):
+    return page.get_by_test_id(name).first
+
+
 def test_app_loads_with_default_result(page):
     assert page.title()
     page.get_by_text("Vapour Pressure Deficit calculator").first.wait_for()
-    assert "1.1 kPa" in metric(page, "Air VPD").inner_text()
+    result(page).wait_for(timeout=TIMEOUT)
+    assert "1.06 kPa" in result(page).inner_text()                        # 22 degC, 60 % RH, zero offset
+    assert "Leaf VPD: 1.06 kPa" in result(page, "secondary").inner_text()
     assert page.get_by_role("tab").count() == 5
-    for tab in ("Calculator", "Day & Night", "Compare treatments", "VPD Heatmap", "Methods & References"):
+    for tab in ("Calculator", "Acceptable range", "Compare treatments", "VPD Heatmap", "Methods & References"):
         assert page.get_by_role("tab", name=tab).count() == 1
 
 
 def test_changing_numeric_inputs_updates_results(page):
     set_number(page, "Air temperature (°C)", 30)
-    metric(page, "Air VPD").get_by_text(f"{vpd.vpd_air(30, 60):.1f} kPa").wait_for(timeout=TIMEOUT)  # rerun done
     set_number(page, "Relative humidity (%)", 50)
-    expected = f"{vpd.vpd_air(30, 50):.1f} kPa"
-    metric(page, "Air VPD").get_by_text(expected).wait_for(timeout=TIMEOUT)
-    assert expected in metric(page, "Air VPD").inner_text()
+    expected = f"{vpd.vpd_air(30, 50):.2f} kPa"
+    result(page).get_by_text(expected).wait_for(timeout=TIMEOUT)
+    assert expected in result(page).inner_text()
+
+
+def test_results_follow_the_slider_before_it_is_released(page):
+    result(page).wait_for(timeout=TIMEOUT)
+    slider = page.get_by_role("slider", name="Air temperature (°C) slider")
+    box = slider.bounding_box()
+    y = box["y"] + box["height"] / 2
+    page.mouse.move(box["x"] + box["width"] * 22 / 45, y)
+    page.mouse.down()
+    page.mouse.move(box["x"] + box["width"] * 30 / 45, y, steps=8)
+    temperature = float(num(page, "Air temperature (°C)").input_value())
+    assert temperature > 25
+    expected = f"{vpd.vpd_air(temperature, 60):.2f} kPa"
+    result(page).get_by_text(expected).wait_for(timeout=2_000)             # pointer is still down
+    page.mouse.up()
+    page.wait_for_function(f"() => location.search.includes('t={temperature:g}')", timeout=TIMEOUT)  # committed
 
 
 def test_switching_modes_reverse_calculation_and_state_preserved(page):
     page.get_by_text(share.MODE_B, exact=True).click()
-    metric(page, "Required relative humidity").get_by_text("62.2 %").wait_for(timeout=TIMEOUT)
+    result(page).get_by_text("62.2 %").wait_for(timeout=TIMEOUT)
     set_number(page, "Air temperature (°C)", 30)
     expected = f"{vpd.rh_for_air_vpd(30, 1.0):.1f} %"
-    metric(page, "Required relative humidity").get_by_text(expected).wait_for(timeout=TIMEOUT)
+    result(page).get_by_text(expected).wait_for(timeout=TIMEOUT)
     page.get_by_text(share.MODE_A, exact=True).click()
-    expected = f"{vpd.vpd_air(30, 60):.1f} kPa"
-    metric(page, "Air VPD").get_by_text(expected).wait_for(timeout=TIMEOUT)  # rerun for mode A done
+    expected = f"{vpd.vpd_air(30, 60):.2f} kPa"
+    result(page).get_by_text(expected).wait_for(timeout=TIMEOUT)
     assert num(page, "Air temperature (°C)").input_value().startswith("30")
-    assert expected in metric(page, "Air VPD").inner_text()
 
 
 def test_unattainable_target_message(page):
@@ -90,29 +110,17 @@ def test_unattainable_target_message(page):
     page.get_by_text("Unattainable").first.wait_for(timeout=TIMEOUT)
 
 
-def test_leaf_offset_preset_changes_leaf_vpd(page):
-    choose(page, "Leaf offset scenario", "-2 °C")
-    expected = f"{vpd.vpd_leaf(22, 60, 20):.1f} kPa"
-    metric(page, "Leaf VPD").get_by_text(expected).wait_for(timeout=TIMEOUT)
-    assert num(page, "Leaf temperature offset (°C)").input_value() == "-2.0"
-    assert "not universal correction factors" in page.get_by_text("not universal correction factors").first.inner_text()
-
-
-def test_growth_stage_preset_sets_range_and_shows_disclaimer(page):
-    choose(page, "Growth-stage preset (illustrative)", "Flowering")
-    page.wait_for_function(
-        "() => [...document.querySelectorAll('input[type=number]')].some(i => i.value === '1.5')")
-    assert num(page, "Lower limit (kPa)").input_value() == "1.2"
-    assert num(page, "Upper limit (kPa)").input_value() == "1.5"
-    assert page.get_by_text("not scientifically validated").first.is_visible()
-    label = f"RH range for air VPD 1.2-1.5 kPa at 22.0 °C"
-    expected = fmt_range(vpd.rh_range_for_vpd_range(22, 1.2, 1.5))
-    metric(page, label).get_by_text(expected).wait_for(timeout=TIMEOUT)
+def test_day_night_target_choice_keeps_calculator_inputs(page):
+    result(page).wait_for(timeout=TIMEOUT)
+    assert "Day target" in page.locator(".status").first.inner_text()
+    page.get_by_text("Night", exact=True).first.click()
+    page.locator(".status").filter(has_text="Night target").first.wait_for(timeout=TIMEOUT)
+    assert num(page, "Air temperature (°C)").input_value() == "22.0"
 
 
 def test_day_and_night_sections(page):
     assert page.get_by_role("heading", name="Day", exact=True).count() == 0      # not in the Calculator tab
-    open_tab(page, "Day & Night")
+    open_tab(page, "Acceptable range")
     page.get_by_role("heading", name="Day", exact=True).wait_for(timeout=TIMEOUT)
     page.get_by_role("heading", name="Night", exact=True).wait_for(timeout=TIMEOUT)
     assert page.get_by_role("heading", name="Day", exact=True).count() == 1
@@ -124,7 +132,7 @@ def test_day_and_night_sections(page):
     assert "22.0 °C" in metric(page, "Day RH range").inner_text()      # day unchanged
     page.get_by_text("Condensation guidance").first.wait_for()
     open_tab(page, "Calculator")                                                  # settings survive tab changes
-    open_tab(page, "Day & Night")
+    open_tab(page, "Acceptable range")
     assert num(page, "Night air temperature (°C)").input_value().startswith("15")
 
 
@@ -171,7 +179,7 @@ def test_download_heatmap_png_pdf_and_svg_via_matplotlib(page, artifacts_dir):
 @pytest.mark.exports
 def test_download_r_script_with_ggplot2_heatmap_and_reproduce(page, artifacts_dir):
     set_number(page, "Air temperature (°C)", 22.34)                         # precise decimal input
-    metric(page, "Air VPD").get_by_text(f"{vpd.vpd_air(22.34, 60):.1f} kPa").wait_for(timeout=TIMEOUT)
+    result(page).get_by_text(f"{vpd.vpd_air(22.34, 60):.2f} kPa").wait_for(timeout=TIMEOUT)
     open_tab(page, "VPD Heatmap")
     page.get_by_text("Leaf VPD", exact=True).locator("visible=true").first.click()
     page.get_by_text("Leaf VPD (kPa) as a function of temperature").first.wait_for(timeout=TIMEOUT)
@@ -252,7 +260,7 @@ def test_full_page_screenshots(browser, app_url, artifacts_dir, console_log, nam
     pg.on("pageerror", lambda e: console_log.append({"type": "pageerror", "text": str(e)}))
     pg.goto(app_url)
     pg.get_by_text("Calculation mode").first.wait_for(timeout=60_000)
-    for tab, slug in (("Calculator", "calculator"), ("Day & Night", "daynight"), ("Compare treatments", "compare"),
+    for tab, slug in (("Calculator", "calculator"), ("Acceptable range", "daynight"), ("Compare treatments", "compare"),
                       ("VPD Heatmap", "heatmap"),
                       ("Methods & References", "methods")):
         pg.get_by_role("tab", name=tab).click()

@@ -1,5 +1,6 @@
 """Streamlit AppTest interaction tests (no browser). Widgets are addressed by stable keys."""
 
+import json
 import re
 from pathlib import Path
 
@@ -30,8 +31,26 @@ def metric_starting(at, prefix):
     return next(m for m in at.metric if m.label.startswith(prefix))
 
 
+LIVE_KEYS = ("t_air", "rh", "target_vpd", "calc_offset", "calc_leaf_meas")
+
+
 def set_num(at, key, value):
-    at.number_input(key=f"{key}__num").set_value(value).run()
+    """Set a number input. The Calculator inputs live in a browser component, so their committed value
+    (what the component sends on release) is simulated by setting the canonical session value."""
+    if key in LIVE_KEYS:
+        at.session_state[key] = value
+        at.run()
+    else:
+        at.number_input(key=f"{key}__num").set_value(value).run()
+
+
+def live(at):
+    """Data sent to the Calculator's live component: mode, target and inputs."""
+    return json.loads(at.get("bidi_component")[0].proto.json)
+
+
+def live_values(at):
+    return {f["key"]: f["value"] for f in live(at)["inputs"]}
 
 
 def tables(at):
@@ -43,12 +62,13 @@ def test_default_run_has_no_exceptions_and_known_values():
     at = new_app().run()
     assert not at.exception
     assert at.radio(key="mode").value == share.MODE_A
-    assert metric(at, "Air VPD") == f"{vpd.vpd_air(22, 60):.1f} kPa" == "1.1 kPa"
+    assert live_values(at) == {"t_air": 22.0, "rh": 60.0, "calc_offset": 0.0}
+    assert live(at)["target"] == {"lo": 0.8, "hi": 1.2, "kind": "air", "period": "Day"}
 
 
 def test_exactly_five_tabs():
     at = new_app().run()
-    assert [t.label for t in at.tabs] == ["Calculator", "Day & Night", "Compare treatments", "VPD Heatmap",
+    assert [t.label for t in at.tabs] == ["Calculator", "Acceptable range", "Compare treatments", "VPD Heatmap",
                                           "Methods & References"]
 
 
@@ -90,7 +110,7 @@ def test_switch_to_required_rh_mode_matches_spec_example():
     at = new_app().run()
     at.radio(key="mode").set_value(share.MODE_B).run()
     assert not at.exception
-    assert metric(at, "Required relative humidity") == "62.2 %"
+    assert live(at)["mode"] == "b" and live_values(at) == {"t_air": 22.0, "target_vpd": 1.0, "calc_offset": 0.0}
 
 
 def test_temperature_preserved_across_modes():
@@ -98,8 +118,8 @@ def test_temperature_preserved_across_modes():
     set_num(at, "t_air", 30.5)
     at.radio(key="mode").set_value(share.MODE_B).run()
     at.radio(key="mode").set_value(share.MODE_A).run()
-    assert at.session_state["t_air"] == 30.5 and at.session_state["t_air__sld"] == 30.5
-    assert metric(at, "Air VPD") == f"{vpd.vpd_air(30.5, 60):.1f} kPa"
+    assert at.session_state["t_air"] == 30.5
+    assert live(at)["mode"] == "a" and live_values(at)["t_air"] == 30.5
 
 
 def test_full_precision_input_is_kept_internally():
@@ -114,53 +134,47 @@ def test_edit_temperature_and_rh_forward():
     set_num(at, "t_air", 25.0)
     set_num(at, "rh", 40.5)
     assert not at.exception
-    assert metric(at, "Air VPD") == f"{vpd.vpd_air(25, 40.5):.1f} kPa"
+    assert live_values(at) == {"t_air": 25.0, "rh": 40.5, "calc_offset": 0.0}
 
 
 def test_edit_target_vpd_reverse():
     at = new_app().run()
     at.radio(key="mode").set_value(share.MODE_B).run()
     set_num(at, "target_vpd", 0.8)
-    assert metric(at, "Required relative humidity") == f"{vpd.rh_for_air_vpd(22, 0.8):.1f} %"
-
-
-def test_slider_updates_number_input():
-    at = new_app().run()
-    at.slider(key="t_air__sld").set_value(18.0).run()
-    assert at.session_state["t_air"] == 18.0 and at.session_state["t_air__num"] == 18.0
+    assert live_values(at)["target_vpd"] == 0.8
 
 
 # ---- air vs leaf and leaf offset ---------------------------------------------------------
-def test_leaf_offset_changes_leaf_vpd_only():
+def test_calculator_has_only_offset_and_measured_leaf_inputs():
     at = new_app().run()
+    calc = at.tabs[0]
+    assert [w.key for w in calc.selectbox] == []                          # no offset scenario / growth-stage selectors
+    assert at.radio(key="calc_leaf_method").value == share.OFFSET_METHOD
     set_num(at, "calc_offset", -2.0)
-    assert metric(at, "Air VPD") == "1.1 kPa"
-    assert metric(at, "Leaf VPD") == f"{vpd.vpd_leaf(22, 60, 20):.1f} kPa"
-
-
-def test_leaf_offset_presets():
-    at = new_app().run()
-    for label, value in zip(presets.LEAF_OFFSET_NAMES[:-1], presets.LEAF_OFFSET_PRESETS):
-        at.selectbox(key="calc_offset_preset").set_value(label).run()
-        assert at.session_state["calc_offset"] == value, label
-        assert metric(at, "Leaf VPD") == f"{vpd.vpd_leaf(22, 60, 22 + value):.1f} kPa"
+    assert live_values(at)["calc_offset"] == -2.0 and live(at)["leafMethod"] == "offset"
+    at.radio(key="calc_leaf_method").set_value(share.MEASURED_METHOD).run()
+    set_num(at, "calc_leaf_meas", 20.0)
     assert not at.exception
+    assert live(at)["leafMethod"] == "measured" and live_values(at)["calc_leaf_meas"] == 20.0
+    assert "calc_offset" not in live_values(at)
 
 
-def test_leaf_offset_custom_value_switches_preset_to_custom():
+def test_leaf_temperature_guidance_replaces_scenario_text():
     at = new_app().run()
-    at.selectbox(key="calc_offset_preset").set_value("-2 °C").run()
-    set_num(at, "calc_offset", -1.5)
-    assert at.session_state["calc_offset_preset"] == "Custom"
-    set_num(at, "calc_offset", 2.0)
-    assert at.session_state["calc_offset_preset"] == "+2 °C"
-
-
-def test_leaf_offset_disclaimer_and_explanation_present():
-    at = new_app().run()
-    text = " ".join(c.value for c in at.caption) + " ".join(m.value for m in at.markdown)
-    assert "not universal correction factors" in text
-    assert "VPD_{leaf}" in text and "condensation" in text
+    expander = next(e for e in at.expander if e.label == "Leaf-temperature guidance")
+    assert expander.proto.expanded is False
+    text = " ".join(m.value for m in expander.markdown) + " ".join(c.value for c in expander.caption)
+    text = " ".join(text.split())
+    for needle in ("1–3 °C below air", "10–15 °C warmer in direct sun", "Figure 4](https://doi.org/10.1371/journal.pone.0138930.g004)",
+                   "| 0* | Night | −3 | −3 |", "| 250 | Overcast / shaded | −3 | −2 |", "| 500 | Cloudy | −2 | −1 |",
+                   "| 750 | Partly cloudy | −1 | 0 |", "| 1,000 | Strong direct sunlight | +0 | +1 |",
+                   "Artificial lighting combines LED and HPS"):
+        assert needle in text, needle
+    everything = " ".join(m.value for m in at.tabs[0].markdown) + " ".join(c.value for c in at.tabs[0].caption)
+    assert "illustrative scenarios, not universal correction factors" not in everything
+    assert not any(e.label.startswith(("Air VPD vs leaf VPD", "About leaf-offset")) for e in at.expander)
+    (image,) = at.get("image")
+    assert image.proto.imgs[0].caption.startswith("Fig. 4. Calculated effects of environmental conditions")
 
 
 def test_target_leaf_vpd_with_offset():
@@ -168,64 +182,38 @@ def test_target_leaf_vpd_with_offset():
     at.radio(key="mode").set_value(share.MODE_B).run()
     at.radio(key="target_kind").set_value(share.LEAF_LABEL).run()
     set_num(at, "calc_offset", -2.0)
-    expected = vpd.rh_for_leaf_vpd(22, 1.0, 20)
-    assert metric(at, "Required relative humidity") == f"{expected:.1f} %"
-    assert metric(at, "Resulting leaf VPD") == "1.0 kPa"
+    assert live(at)["targetKind"] == "leaf" and live_values(at)["calc_offset"] == -2.0
 
 
-def test_measured_leaf_temperature_input():
+# ---- acceptable range replaces the Calculator's own target range -----------------------------------
+def test_calculator_has_no_separate_target_range_controls():
     at = new_app().run()
-    at.radio(key="calc_leaf_method").set_value(share.MEASURED_METHOD).run()
-    set_num(at, "calc_leaf_meas", 20.0)
-    assert not at.exception
-    assert metric(at, "Leaf VPD") == f"{vpd.vpd_leaf(22, 60, 20):.1f} kPa"
+    assert "Target VPD range" not in [s.value for s in at.subheader]
+    keys = {w.key for w in at.tabs[0].number_input} | {w.key for w in at.tabs[0].selectbox} | {w.key for w in at.tabs[0].radio}
+    assert not keys & {"vpd_lo__num", "vpd_hi__num", "vpd_preset", "interval_kind", "calc_offset_preset"}
+    assert "Acceptable range" in [s.value for s in at.subheader]
 
 
-# ---- target VPD range and presets ------------------------------------------------------------
-def test_range_section_is_named_range_not_interval():
+def test_day_night_selector_chooses_target_without_changing_calculator_inputs():
     at = new_app().run()
-    headers = [s.value for s in at.subheader]
-    assert "Target VPD range" in headers
-    assert not any("interval" in (s.value or "").lower() for s in at.subheader)
+    at.selectbox(key="dn_preset_night").set_value("Flowering").run()
+    at.radio(key="dn_kind_night").set_value(share.LEAF_LABEL).run()
+    set_num(at, "t_air", 27.0)
+    before = live_values(at)
+    assert at.radio(key="calc_period").value == "Day"
+    assert live(at)["target"] == {"lo": 0.8, "hi": 1.2, "kind": "air", "period": "Day"}
+    at.radio(key="calc_period").set_value("Night").run()
+    assert live(at)["target"] == {"lo": 1.0, "hi": 1.5, "kind": "leaf", "period": "Night"}
+    assert live_values(at) == before and at.session_state["dn_t_night"] == 17.0
 
 
-@pytest.mark.parametrize("stage", list(presets.GROWTH_STAGES))
-def test_growth_stage_presets_set_the_range(stage):
+def test_point_and_invalid_targets_are_passed_to_the_panel():
     at = new_app().run()
-    at.selectbox(key="vpd_preset").set_value(stage).run()
-    lo, hi = presets.stage_range(stage, "day")
-    assert (at.session_state["vpd_lo"], at.session_state["vpd_hi"]) == (lo, hi)
-    assert not at.exception
-    assert any("not scientifically validated" in c.value for c in at.caption)
-
-
-def test_custom_preset_keeps_values_and_edit_switches_to_custom():
-    at = new_app().run()
-    at.selectbox(key="vpd_preset").set_value("Flowering").run()
-    at.selectbox(key="vpd_preset").set_value("Custom").run()
-    assert (at.session_state["vpd_lo"], at.session_state["vpd_hi"]) == (1.2, 1.5)
-    at.selectbox(key="vpd_preset").set_value("Vegetative").run()
-    set_num(at, "vpd_lo", 0.9)
-    assert at.session_state["vpd_preset"] == "Custom"
-
-
-def test_custom_range_rh_range_and_status():
-    at = new_app().run()
-    label = metric_starting(at, "RH range").label
-    assert "0.8-1.2" in label
-    rr = vpd.rh_range_for_vpd_range(22, 0.8, 1.2)
-    assert metric(at, label) == f"{rr['rh_min']:.1f} - {rr['rh_max']:.1f} %"
-    assert any("inside" in s.value for s in at.success)
-    set_num(at, "vpd_hi", 1.0)
-    assert any("above" in w.value for w in at.warning)
-
-
-def test_range_limits_validation_message():
-    at = new_app().run()
-    set_num(at, "vpd_lo", 2.0)
-    set_num(at, "vpd_hi", 1.0)
-    assert any("Lower limit must not exceed" in e.value for e in at.error)
-    assert not at.exception
+    at.selectbox(key="dn_preset_day").set_value("Vegetative").run()               # 1.0-1.0 kPa
+    assert live(at)["target"]["lo"] == live(at)["target"]["hi"] == 1.0
+    set_num(at, "dn_lo_day", 2.0)
+    set_num(at, "dn_hi_day", 1.0)
+    assert live(at)["target"] is None and not at.exception
 
 
 # ---- day and night sections --------------------------------------------------------------------
@@ -280,31 +268,6 @@ def test_day_night_inverted_range_shows_error():
 
 
 # ---- validation messages ------------------------------------------------------------------------
-def test_unattainable_target_shows_error_and_does_not_clamp():
-    at = new_app().run()
-    at.radio(key="mode").set_value(share.MODE_B).run()
-    set_num(at, "target_vpd", 5.0)
-    assert any("Unattainable" in e.value for e in at.error)
-    shown = metric_starting(at, "Required relative humidity (not").value
-    assert float(shown.split()[0]) < 0          # raw, unclamped value is displayed
-
-
-def test_unattainable_below_minimum_leaf_target():
-    at = new_app().run()
-    at.radio(key="mode").set_value(share.MODE_B).run()
-    at.radio(key="target_kind").set_value(share.LEAF_LABEL).run()
-    set_num(at, "calc_offset", -3.0)
-    set_num(at, "target_vpd", -1.0)
-    assert any("Unattainable" in e.value for e in at.error)
-
-
-def test_negative_leaf_vpd_warning():
-    at = new_app().run()
-    set_num(at, "rh", 98.0)
-    set_num(at, "calc_offset", -3.0)
-    assert any("condensation" in w.value for w in at.warning)
-
-
 # ---- share links and query parameters --------------------------------------------------------------
 def test_share_link_restores_settings():
     at = new_app()
@@ -313,7 +276,7 @@ def test_share_link_restores_settings():
     at.run()
     assert not at.exception
     assert at.session_state["t_air"] == 30.0
-    assert metric(at, "Air VPD") == f"{vpd.vpd_air(30, 50):.1f} kPa"
+    assert live_values(at)["t_air"] == 30.0 and live_values(at)["rh"] == 50.0
 
 
 def test_legacy_share_url_still_works_and_selects_matching_preset():
@@ -326,8 +289,9 @@ def test_legacy_share_url_still_works_and_selects_matching_preset():
     s = at.session_state
     assert (s["t_air"], s["target_vpd"], s["target_kind"], s["interval_kind"], s["calc_offset"]) == (
         25.0, 1.1, share.LEAF_LABEL, share.LEAF_LABEL, -2.0)
-    assert s["vpd_preset"] == "Flowering" and s["calc_offset_preset"] == "-2 °C"
-    assert metric(at, "Required relative humidity") == f"{vpd.rh_for_leaf_vpd(25, 1.1, 23):.1f} %"
+    assert (s["vpd_lo"], s["vpd_hi"]) == (1.2, 1.5)                  # legacy settings still load (no longer used)
+    assert live(at)["mode"] == "b" and live(at)["targetKind"] == "leaf"
+    assert live_values(at) == {"t_air": 25.0, "target_vpd": 1.1, "calc_offset": -2.0}
 
 
 def test_invalid_share_link_falls_back_to_defaults():
@@ -411,74 +375,8 @@ def test_every_tab_renders_after_a_full_interaction_sequence():
 
 
 # ---- single-value (point) targets: equal lower and upper limits -----------------------------------
-def point_target_app(value=1.0):
-    at = new_app().run()
-    set_num(at, "vpd_hi", max(value, at.session_state["vpd_hi"]))
-    set_num(at, "vpd_lo", value)
-    set_num(at, "vpd_hi", value)
-    assert at.session_state["vpd_lo"] == at.session_state["vpd_hi"] == value
-    return at
-
-
 def texts(elements):
     return [e.value for e in elements]
-
-
-def test_point_target_labels_and_single_rh_value():
-    at = point_target_app(1.0)
-    assert not at.exception
-    assert any("Target air VPD: 1.0 kPa" in v for v in texts(at.markdown))
-    m = metric_starting(at, "Required RH for air VPD 1.0 kPa")
-    assert m.label == "Required RH for air VPD 1.0 kPa at 22.0 °C"
-    assert m.value == f"{vpd.rh_for_air_vpd(22, 1.0):.1f} %" and " - " not in m.value
-    assert not any(x.label.startswith("RH range for") for x in at.metric)
-    assert not any("1.0-1.0" in v for v in texts(at.markdown) + texts(at.success) + texts(at.warning))
-
-
-def test_point_target_uses_leaf_wording_for_leaf_basis():
-    at = point_target_app(1.0)
-    at.radio(key="interval_kind").set_value("Leaf VPD").run()
-    assert any("Target leaf VPD: 1.0 kPa" in v for v in texts(at.markdown))
-    assert metric_starting(at, "Required RH for leaf VPD 1.0 kPa").value.endswith(" %")
-
-
-@pytest.mark.parametrize("rh,word", [(60.0, "above target"), (80.0, "below target")])
-def test_point_target_below_and_above_wording(rh, word):
-    at = point_target_app(1.0)
-    set_num(at, "rh", rh)
-    assert any(word in v for v in texts(at.warning)), texts(at.warning)
-    assert not any("the range" in v for v in texts(at.warning) + texts(at.success))
-
-
-def test_point_target_at_25c_reverse_calculation_is_at_target():
-    at = new_app().run()
-    at.radio(key="mode").set_value(share.MODE_B).run()
-    set_num(at, "t_air", 25.0)
-    set_num(at, "target_vpd", 1.0)
-    set_num(at, "vpd_hi", 1.0)
-    set_num(at, "vpd_lo", 1.0)
-    assert not at.exception
-    assert vpd.calculate_required_rh(25, 1.0, vpd.AIR).vpd_air > 1.0          # floating-point overshoot
-    assert any("at target" in v for v in texts(at.success)), (texts(at.success), texts(at.warning))
-    assert not any("above target" in v for v in texts(at.warning))
-
-
-def test_unequal_range_wording_is_unchanged():
-    at = new_app().run()
-    set_num(at, "vpd_lo", 0.8)
-    set_num(at, "vpd_hi", 1.2)
-    assert any("inside the range 0.8-1.2 kPa" in v for v in texts(at.success))
-    m = metric_starting(at, "RH range for air VPD 0.8-1.2 kPa")
-    assert " - " in m.value and m.value.endswith(" %")
-    assert not any("Target air VPD:" in v for v in texts(at.markdown))
-    assert not any("at target" in v for v in texts(at.success) + texts(at.warning))
-
-
-def test_unattainable_point_target_shows_single_value_error():
-    at = point_target_app(5.0)
-    errors = texts(at.error)
-    assert any("No RH between 0 and 100 % gives a air VPD of 5.0 kPa" in e and " to " not in e for e in errors), errors
-    assert not any(m.label.startswith(("Required RH for", "RH range for")) for m in at.metric)
 
 
 def test_day_and_night_point_targets_use_single_value_display():
@@ -626,7 +524,7 @@ def test_day_night_link_restores_controls_and_rh_results_in_fresh_session():
     assert n.value == f"{rh_lo:.1f} - {rh_hi:.1f} %"
     # the main calculator is untouched
     assert (s["t_air"], s["rh"], s["vpd_lo"], s["vpd_hi"], s["calc_offset"]) == (22.0, 60.0, 0.8, 1.2, 0.0)
-    assert metric(at, "Air VPD") == "1.1 kPa"
+    assert live_values(at) == {"t_air": 22.0, "rh": 60.0, "calc_offset": 0.0}
 
 
 def test_share_link_restores_preset_identity_and_custom_status():
@@ -657,7 +555,7 @@ def test_legacy_link_keeps_day_night_defaults_and_old_presets():
     assert (s["dn_lo_day"], s["dn_hi_day"], s["dn_lo_night"], s["dn_hi_night"]) == (0.8, 1.2, 0.8, 1.2)
     assert at.radio(key="dn_kind_day").value == share.AIR_LABEL
     assert s["dn_preset_day"] == s["dn_preset_night"] == "General horticulture"
-    assert s["vpd_preset"] == "Flowering"
+    assert (s["vpd_lo"], s["vpd_hi"]) == (1.2, 1.5)
 
 
 @pytest.mark.parametrize("bad", [
@@ -923,7 +821,7 @@ def saved_setup(monkeypatch, params=SETUP_LINK):
 
 def widget_snapshot(at):
     s = at.session_state
-    keys = ["mode", "t_air", "rh", "target_vpd", "vpd_lo", "vpd_hi", "calc_offset", "interval_kind",
+    keys = ["mode", "t_air", "rh", "target_vpd", "vpd_lo", "vpd_hi", "calc_offset",
             "dn_t_day", "dn_off_day", "dn_lo_day", "dn_hi_day", "dn_kind_day", "dn_preset_day",
             "dn_t_night", "dn_off_night", "dn_lo_night", "dn_hi_night", "dn_kind_night", "dn_preset_night",
             "hm_kind", "hm_tmin", "hm_tmax", "hm_rhmin", "hm_rhmax", "hm_cs", "hm_step", "hm_zmax",
@@ -952,7 +850,7 @@ def test_export_change_import_restores_the_saved_setup(monkeypatch):
     # controls, results, chart and URL reflect the setup
     assert at.number_input(key="dn_t_day__num").value == 33.0 and at.number_input(key="hm_tmin").value == 12.0
     assert at.selectbox(key="hm_cs").value == "Viridis" and at.radio(key="hm_kind").value == share.LEAF_LABEL
-    assert metric(at, "Air VPD") == f"{vpd.vpd_air(25, 40):.1f} kPa"
+    assert live_values(at)["t_air"] == 25.0 and live_values(at)["rh"] == 40.0
     assert metric_starting(at, "Day required RH for leaf VPD 1.0 kPa at 33.0 °C")
     assert heatmap_spec(at)["layout"]["xaxis"]["range"] == [12, 38]
     assert {k: qp(at, k) for k in saved_params} == saved_params
@@ -1043,10 +941,10 @@ def test_heatmap_leaf_assumption_caption_for_leaf_colours_and_leaf_targets():
     at = app_with_params({"hk": "leaf", "off": "-2"})                       # leaf heatmap, offset input
     (note,) = leaf_note(at)
     assert "-2.0 °C" in note and "air temperature − 2.0 °C throughout this chart" in note and "derived" not in note
-    at = app_with_params({"hk": "air", "ik": "leaf", "hg": "1", "off": "-2"})   # air heatmap, leaf target shown
+    at = app_with_params({"hk": "air", "dk": "leaf", "hg": "1", "off": "-2"})   # air heatmap, leaf target shown
     assert len(leaf_note(at)) == 1
     # measured leaf temperature: 22 degC air, 20 degC leaf -> -2 degC offset, explained
-    at = app_with_params({"hk": "air", "ik": "leaf", "t": "22", "lm": "20"})
+    at = app_with_params({"hk": "air", "dk": "leaf", "t": "22", "lm": "20"})
     (note,) = leaf_note(at)
     assert "-2.0 °C" in note and "air temperature − 2.0 °C throughout this chart" in note
     assert "30 °C" not in note
@@ -1063,9 +961,9 @@ def test_heatmap_condensation_note_only_when_the_zero_line_is_drawn():
 
 
 def test_heatmap_leaf_assumption_caption_absent_without_leaf_use():
-    assert leaf_note(app_with_params({"hk": "air", "ik": "air", "off": "-2"})) == []      # air chart, air target
-    assert leaf_note(app_with_params({"hk": "air", "ik": "leaf", "hg": "0", "off": "-2"})) == []  # target hidden
-    assert leaf_note(app_with_params({"hk": "air", "ik": "leaf", "lo": "1.5", "hi": "0.5"})) == []  # invalid range
+    assert leaf_note(app_with_params({"hk": "air", "dk": "air", "off": "-2"})) == []      # air chart, air target
+    assert leaf_note(app_with_params({"hk": "air", "dk": "leaf", "hg": "0", "off": "-2"})) == []  # target hidden
+    assert leaf_note(app_with_params({"hk": "air", "dk": "leaf", "dlo": "1.5", "dhi": "0.5"})) == []  # invalid range
 
 
 # ---- heatmap figure downloads (PNG, PDF, SVG) and their cache -----------------------------------------
