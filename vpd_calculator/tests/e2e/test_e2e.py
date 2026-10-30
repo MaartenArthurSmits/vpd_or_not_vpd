@@ -62,7 +62,7 @@ def test_app_loads_with_default_result(page):
     page.get_by_text("Vapour Pressure Deficit calculator").first.wait_for()
     result(page).wait_for(timeout=TIMEOUT)
     assert "1.06 kPa" in result(page).inner_text()                        # 22 degC, 60 % RH, zero offset
-    assert "Leaf VPD: 1.06 kPa" in result(page, "secondary").inner_text()
+    assert "Air VPD: 1.06 kPa" in result(page, "secondary").inner_text()
     assert page.get_by_role("tab").count() == 5
     for tab in ("Calculator", "Acceptable range", "Compare treatments", "VPD Heatmap", "Methods & References"):
         assert page.get_by_role("tab", name=tab).count() == 1
@@ -94,10 +94,10 @@ def test_results_follow_the_slider_before_it_is_released(page):
 
 def test_switching_modes_reverse_calculation_and_state_preserved(page):
     page.get_by_text(share.MODE_B, exact=True).click()
-    result(page).get_by_text("62.2 %").wait_for(timeout=TIMEOUT)
+    result(page, "required-rh").get_by_text("62.2%").wait_for(timeout=TIMEOUT)
     set_number(page, "Air temperature (°C)", 30)
     expected = f"{vpd.rh_for_air_vpd(30, 1.0):.1f} %"
-    result(page).get_by_text(expected).wait_for(timeout=TIMEOUT)
+    result(page, "required-rh").get_by_text(expected.replace(" %", "%")).wait_for(timeout=TIMEOUT)
     page.get_by_text(share.MODE_A, exact=True).click()
     expected = f"{vpd.vpd_air(30, 60):.2f} kPa"
     result(page).get_by_text(expected).wait_for(timeout=TIMEOUT)

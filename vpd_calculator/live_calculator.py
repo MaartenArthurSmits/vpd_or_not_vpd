@@ -36,7 +36,8 @@ CSS = """
         border: 2px solid var(--st-background-color, #fff); border-radius: 3px; box-sizing: content-box; }
 .axis { position: relative; height: 1.1rem; font-size: 0.75rem; opacity: 0.7; }
 .axis span { position: absolute; }
-.second { font-size: 1.1rem; margin-top: 0.75rem; }
+.big2 { font-size: 1.3rem; font-weight: 600; margin-top: 0.25rem; }
+.second { font-size: 0.95rem; opacity: 0.85; margin-top: 0.75rem; }
 .second b { font-weight: 600; }
 details { margin-top: 0.75rem; border: 1px solid rgba(128,128,128,0.35); border-radius: 0.5rem; padding: 0.4rem 0.75rem; }
 summary { cursor: pointer; font-size: 0.9rem; }
@@ -89,56 +90,82 @@ export function classify(value, lo, hi) {
   return 'inside';
 }
 
-function barHtml(cur, t) {
-  const lo = t.lo, hi = t.hi, point = lo === hi;
-  let dmin = Math.min(0, lo, hi, cur), dmax = Math.max(2, lo, hi, cur);
+// Horizontal bar: value marker plus a green band (range) or a line (single target). `s` describes the scale.
+function barHtml(s) {
+  const point = s.point;
+  let dmin = Math.min(...s.domain), dmax = Math.max(...s.domain);
   const pad = 0.04 * (dmax - dmin);
-  if (cur <= dmin) dmin -= pad;
-  if (cur >= dmax) dmax += pad;
+  if (s.cur <= dmin) dmin -= pad;
+  if (s.cur >= dmax) dmax += pad;
   const pct = (x) => (100 * (x - dmin) / (dmax - dmin));
-  const clampPct = (p) => Math.min(92, Math.max(8, p));
-  const pos = classify(cur, lo, hi);
+  const pos = s.pos;
   const word = point ? { below: 'Below target', inside: 'At target', above: 'Above target' }[pos]
                      : { below: 'Below range', inside: 'Within range', above: 'Above range' }[pos];
-  const bounds = point ? k2(lo) : `${lo.toFixed(2)}\u2013${hi.toFixed(2)} kPa`;
-  const mid = clampPct(point ? pct(lo) : (pct(lo) + pct(hi)) / 2);
-  const shape = point
-    ? `<div class="tick" style="left:${pct(lo)}%"></div>`
-    : `<div class="band" style="left:${pct(lo)}%;width:${pct(hi) - pct(lo)}%"></div>`;
+  const mid = Math.min(92, Math.max(8, point ? pct(s.lo) : (pct(s.lo) + pct(s.hi)) / 2));
+  const shape = s.empty ? ''
+    : point ? `<div class="tick" style="left:${pct(s.lo)}%"></div>`
+            : `<div class="band" style="left:${pct(s.lo)}%;width:${pct(s.hi) - pct(s.lo)}%"></div>`;
   return `
-    <div class="status ${pos === 'inside' ? 'in' : ''}">${word} \u00b7 ${t.period} target \u00b7 ${NAME[t.kind]}</div>
-    <div class="rowlab"><span style="left:${mid}%">${point ? 'Target ' : ''}${bounds}</span></div>
-    <div class="bar" role="img" aria-label="${word}">${shape}<div class="mark" data-testid="marker" style="left:${pct(cur)}%"></div></div>
-    <div class="axis"><span style="left:0">${dmin.toFixed(2).replace('-', '\u2212')}</span><span style="right:0">${dmax.toFixed(2)}</span></div>
+    <div class="status ${pos === 'inside' ? 'in' : ''}">${word} \u00b7 ${s.context}</div>
+    <div class="rowlab"><span style="left:${mid}%">${s.empty ? 'No attainable RH in this range' : (point ? 'Target ' : '') + s.bounds}</span></div>
+    <div class="bar" role="img" aria-label="${s.unit} bar: ${word}" data-unit="${s.unit}">${shape}<div class="mark" data-testid="marker" style="left:${pct(s.cur)}%"></div></div>
+    <div class="axis"><span style="left:0">${s.axis(dmin)}</span><span style="right:0">${s.axis(dmax)}</span></div>
+    ${s.note ? `<div class="hint">${s.note}</div>` : ''}
     <div class="hint">Edit this target in the Acceptable range tab.</div>`;
+}
+
+// Forward mode: the bar shows leaf VPD (kPa); an air-VPD range is converted to leaf-VPD limits.
+function leafBar(r, t) {
+  const shift = t.kind === 'air' ? r.esL - r.esA : 0;      // leaf VPD = air VPD + es(T_leaf) - es(T_air) at the same e_a
+  const lo = t.lo + shift, hi = t.hi + shift;
+  const kpa = (x) => x.toFixed(2).replace('-', '\u2212');
+  return barHtml({
+    cur: r.leaf, lo, hi, point: t.lo === t.hi, pos: classify(r.leaf, lo, hi), unit: 'kPa', domain: [0, lo, hi, r.leaf, 2],
+    bounds: lo === hi ? k2(lo) : `${kpa(lo)}\u2013${kpa(hi)} kPa`, axis: (x) => kpa(x),
+    context: `${t.period} target \u00b7 Leaf VPD`,
+    note: t.kind === 'air'
+      ? `Converted from the ${t.period.toLowerCase()} air-VPD range ${t.lo === t.hi ? k2(t.lo) : t.lo.toFixed(2) + '\u2013' + t.hi.toFixed(2) + ' kPa'} to leaf-VPD limits at the current air and leaf temperatures (${f1(r.tLeaf - r.offset)} / ${f1(r.tLeaf)} \u00b0C).`
+      : '',
+  });
+}
+
+// Reverse mode: the bar shows required RH (%) against the RH interval of the acceptable VPD range.
+function rhBar(d, r, t) {
+  const rhFor = (v) => t.kind === 'air' ? 100 * (1 - v / r.esA) : 100 * (r.esL - v) / r.esA;
+  const rawLo = rhFor(t.hi), rawHi = rhFor(t.lo);          // higher VPD <-> lower RH
+  const lo = Math.max(rawLo, 0), hi = Math.min(rawHi, 100);
+  const empty = lo > hi;
+  const vpdNow = t.kind === 'air' ? r.air : r.leaf;         // classify in VPD space (same order, same tolerance)
+  const pos = classify(vpdNow, t.lo, t.hi);
+  const pc = (x) => x.toFixed(1).replace('-', '\u2212');
+  const partial = !empty && (rawLo < 0 || rawHi > 100);
+  return barHtml({
+    cur: r.rh, lo: empty ? 0 : lo, hi: empty ? 0 : hi, point: t.lo === t.hi, empty, pos, unit: 'RH (%)', domain: [0, 100, r.rh],
+    bounds: t.lo === t.hi ? `${pc(lo)} %` : `${pc(lo)}\u2013${pc(hi)} %`, axis: (x) => pc(x) + ' %',
+    context: `${t.period} target \u00b7 ${NAME[t.kind]} ${t.lo === t.hi ? k2(t.lo) : t.lo.toFixed(2) + '\u2013' + t.hi.toFixed(2) + ' kPa'}`,
+    note: partial ? `Part of the range is unattainable (unclipped RH ${pc(rawLo)} to ${pc(rawHi)} %); the attainable part is shown.` : '',
+  });
 }
 
 export function resultsHtml(d, v) {
   const r = compute(d, v);
   const t = d.target;
-  const basis = t ? t.kind : 'air';
-  const other = basis === 'air' ? 'leaf' : 'air';
   let h = '';
   if (d.mode === 'b' && !r.attainable) {
     h += `<div class="err">${r.message}</div>`;
     h += `<div class="big"><span class="lab">Required relative humidity (not physically attainable)</span><br>${f1(r.rh)} %</div>`;
     return h;
   }
+  h += `<div class="big" data-testid="primary"><span class="lab">Leaf VPD</span> \u2014 ${k2(r.leaf)}</div>`;
   if (d.mode === 'b') {
-    h += `<div class="big" data-testid="primary"><span class="lab">Required relative humidity</span> \u2014 ${f1(Math.min(Math.max(r.rh, 0), 100))} %</div>`;
-  } else {
-    h += `<div class="big" data-testid="primary"><span class="lab">${NAME[basis]}</span> \u2014 ${k2(r[basis])}</div>`;
+    h += `<div class="big2" data-testid="required-rh">Required RH: ${f1(Math.min(Math.max(r.rh, 0), 100))}%</div>`;
   }
   if (t) {
-    h += barHtml(r[t.kind], t);
+    h += d.mode === 'a' ? leafBar(r, t) : rhBar(d, r, t);
   } else {
     h += `<div class="hint">The acceptable range is invalid (lower limit above upper limit). Fix it in the Acceptable range tab.</div>`;
   }
-  if (d.mode === 'a') {
-    h += `<div class="second" data-testid="secondary">${NAME[other]}: <b>${k2(r[other])}</b></div>`;
-  } else {
-    h += `<div class="second" data-testid="secondary">Resulting air VPD: <b>${k2(r.air)}</b> \u00b7 Resulting leaf VPD: <b>${k2(r.leaf)}</b></div>`;
-  }
+  h += `<div class="second" data-testid="secondary">Air VPD: <b>${k2(r.air)}</b></div>`;
   h += `<div class="cap">Leaf temperature used: ${f1(r.tLeaf)} \u00b0C (offset ${signed1(r.offset)} \u00b0C)</div>`;
   if (d.mode === 'a') {
     h += `<details><summary>Calculation details</summary><div class="det">
