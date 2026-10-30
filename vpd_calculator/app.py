@@ -129,6 +129,22 @@ LEAF_TABLE = """
 LEAF_TABLE_CAPTION = (
     f"Estimates informed by [Nelson and Bugbee (2015), Figure 4]({FIG4_URL}). The reference figure assumes 25 °C air, "
     "50% RH, 1 m/s airflow, 5 cm leaf width, and stomatal conductance of 0.4 mol m⁻² s⁻¹.")
+EQ_ACTUAL = r"e_a=e_s(T_{\mathrm{air}})\frac{RH}{100}"
+SYMBOL_TABLE = r"""
+| Symbol | Unit | Meaning |
+|---|---|---|
+| $T$ | °C | Temperature supplied to the saturation-vapour-pressure equation. |
+| $T_{\mathrm{air}}$ | °C | Air temperature. |
+| $T_{\mathrm{leaf}}$ | °C | Measured or estimated representative leaf temperature. |
+| $\Delta T$ | °C | Leaf temperature minus air temperature. |
+| $RH$ | % | Relative humidity of the surrounding air. |
+| $e_s(T)$ | kPa | Saturation vapour pressure: the water-vapour pressure at equilibrium with liquid water at temperature $T$. |
+| $e_s(T_{\mathrm{air}})$ | kPa | Saturation vapour pressure at air temperature. |
+| $e_s(T_{\mathrm{leaf}})$ | kPa | Saturation vapour pressure at leaf temperature, used to represent the assumed saturated leaf interior. |
+| $e_a$ | kPa | Actual water-vapour partial pressure in the surrounding air, calculated from air temperature and RH. |
+| $VPD_{\mathrm{canopy}}$ | kPa | Leaf-to-air vapour-pressure difference: $e_s(T_{\mathrm{leaf}})-e_a$. |
+| $VPD_{\mathrm{air}}$ | kPa | Air saturation deficit: $e_s(T_{\mathrm{air}})-e_a$. |"""
+SYMBOL_TARGET_ROW = "\n| $VPD_{\\mathrm{target}}$ | kPa | The chosen canopy-VPD target in Calculate RH mode. |"
 EQ_SATURATION = r"e_s(T)=0.6108\exp\left(\frac{17.27T}{T+237.3}\right)"
 EQ_FORWARD = r"VPD_{\mathrm{leaf}}=e_s(T_{\mathrm{leaf}})-e_s(T_{\mathrm{air}})\frac{RH}{100}"
 EQ_REVERSE_LEAF = r"RH=100\frac{e_s(T_{\mathrm{leaf}})-VPD_{\mathrm{target}}}{e_s(T_{\mathrm{air}})}"
@@ -284,9 +300,13 @@ with tab_calc:
             rh_used = st.session_state["rh"] if mode_a else res.rh
             d2.markdown(f"Actual vapour pressure  \n**{es_air * rh_used / 100:.2f} kPa**")
         st.latex(EQ_SATURATION)
+        st.latex(EQ_ACTUAL)
         st.latex(EQ_FORWARD if mode_a else EQ_REVERSE_LEAF)
-        st.caption(EQ_CAPTION)
+        st.markdown(SYMBOL_TABLE if mode_a else SYMBOL_TABLE + SYMBOL_TARGET_ROW)
+        st.caption(EQ_CAPTION + " 1 kPa = 1,000 Pa. The same actual vapour pressure $e_a$ is used for the air and "
+                   "canopy calculations.")
         st.caption("Canopy VPD uses the representative leaf temperature; canopy RH is the surrounding air’s relative humidity.")
+
 
     with st.expander("Leaf-temperature guidance"):
         st.markdown(LEAF_GUIDANCE)
@@ -305,23 +325,11 @@ with tab_calc:
 # Acceptable range
 # ==========================================================================
 NIGHT_NOTES = """
-Night-time humidity management should avoid prolonged humid conditions and condensation. Runkle (2022)
-recommends maintaining air VPD above 0.3 kPa when managing cooler nights, but gives no upper night-time limit
-([Runkle, *Pros and Cons of Cool Nights*](https://www.canr.msu.edu/floriculture/uploads/files/Cool%20nights.pdf)).
+Night-time humidity management should avoid prolonged humid conditions and condensation. Runkle (2022) recommends maintaining air VPD above 0.3 kPa when managing cooler nights ([Runkle, *Pros and Cons of Cool Nights*](https://www.canr.msu.edu/floriculture/uploads/files/Cool%20nights.pdf)).
 
-Make environmental transitions gradually, particularly when VPD increases. In a daytime strawberry study,
-Yamanaka et al. (2025) associated fruit-stalk shrinkage, an indicator of water stress, with rising air VPD. Their
-model identified a threshold of 0.069 hPa/min = 0.0069 kPa/min, approximately 0.41 kPa/hour, at VPD of 0.8 kPa or
-higher. This is a study-specific finding, not a universal transition-speed limit or a night-time recommendation
-([Yamanaka et al., 2025](https://doi.org/10.2503/hortj.SZD-015)).
+Make environmental transitions gradually, particularly when VPD increases. Yamanaka et al. (2025) associated water stress with rising air VPD at a threshold of approximately 0.41 kPa/hour ([Yamanaka et al., 2025](https://doi.org/10.2503/hortj.SZD-015)).
 
-This calculator initially uses the same range for day and night as an editable starting point. Equipment
-constraints may require different night settings. Adjust them for the crop and growing conditions while
-monitoring humidity and condensation.
-
-MSU reports a tomato study in which 0.8 kPa during both day and night performed better than 0.5 kPa throughout.
-This supports that particular treatment comparison, not a universal benefit from equal day/night VPD
-([Wollaeger & Runkle (2015), MSU Extension](https://msu-prod.dotcmscloud.com/news/why_should_greenhouse_growers_pay_attention_to_vapor_pressure_deficit_and_n)).
+This calculator uses the same range for day and night by default. Equipment constraints may require different night settings. Adjust them as needed.
 """
 
 with tab_daynight:
@@ -358,31 +366,26 @@ with tab_daynight:
             "measurements; its 0.8–1.2 kPa guidance cites Lieten (2002), not their own experiment. Saturation vapour "
             "pressure follows [FAO-56, Eq. 11](https://www.fao.org/4/x0490e/x0490e07.htm).")
 
+    st.caption("Uses the current Calculator conditions.")
+
     def period_section(period: str):
+        """Limits on the left, that period's result bar (current Calculator conditions) on the right."""
         p_ = period.lower()
-        with st.container(border=True):
-            st.markdown(f"### {period}")
-            c1, c2 = st.columns(2, gap="large")
-            with c1:
-                dlo = linked(f"{period} lower limit (kPa)", f"dn_lo_{p_}", 0.0, 4.0, 0.05, fmt="%.2f", num_max=10.0,
-                             after=range_edited)
-            with c2:
-                dhi = linked(f"{period} upper limit (kPa)", f"dn_hi_{p_}", 0.0, 4.0, 0.05, fmt="%.2f", num_max=10.0,
-                             after=range_edited)
+        left, right = st.columns([5, 6], gap="large")
+        with left:
+            dlo = linked(f"{period} lower limit (kPa)", f"dn_lo_{p_}", 0.0, 4.0, 0.05, fmt="%.2f", num_max=10.0,
+                         after=range_edited)
+            dhi = linked(f"{period} upper limit (kPa)", f"dn_hi_{p_}", 0.0, 4.0, 0.05, fmt="%.2f", num_max=10.0,
+                         after=range_edited)
             if dlo > dhi:
                 st.error(f"{period}: lower limit must not exceed the upper limit.")
+        with right:
+            target = {"lo": dlo, "hi": dhi, "kind": vpd.LEAF, "period": period} if dlo <= dhi else None
+            live_calculator.result_panel(dict(calc_payload, readonly=True, target=target, title=f"{period} result"),
+                                         key=f"range_panel_{p_}")
 
     period_section("Day")
     period_section("Night")
-
-    # Same result panel as the Calculator, from the same state (display only).
-    def period_from_range_tab():
-        st.session_state["calc_period"] = st.session_state["calc_period__r"]
-
-    st.session_state["calc_period__r"] = st.session_state["calc_period"]
-    st.radio("Compare with", ["Day", "Night"], key="calc_period__r", on_change=period_from_range_tab, horizontal=True)
-    live_calculator.result_panel(dict(calc_payload, readonly=True))
-    st.caption("Uses the current Calculator conditions.")
 
     live_calculator.copy_link_button(share.share_url(st.session_state))
     st.caption("Share your current settings.")

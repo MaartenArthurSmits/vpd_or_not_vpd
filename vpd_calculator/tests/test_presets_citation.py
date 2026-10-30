@@ -45,7 +45,8 @@ def test_adaptation_statement_is_explicit_and_sources_are_in_the_references():
     app = (ROOT / "app.py").read_text(encoding="utf-8")
     for needle in ("Yamanaka, R.", "Lopez, R.", "Runkle, E. S. (2021", "Runkle, E. S. (2022", "Wollaeger, H.", "ASHRAE. (2023)", "Bayer. (2020"):
         assert needle in app, needle
-    for needle in ("0.069 hPa/min = 0.0069 kPa/min", "no upper night-time limit", "not a universal transition-speed limit"):
+    for needle in ("above 0.3 kPa when managing cooler nights", "approximately 0.41 kPa/hour",
+                   "same range for day and night by default"):
         assert needle in app, needle
 
 

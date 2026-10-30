@@ -801,6 +801,7 @@ def test_range_tab_only_edits_ranges_and_has_one_preset_selector():
     assert not tab.metric and not tab.info
     assert limits(at) == ((0.7, 1.3), (0.7, 1.3))
     assert "Uses the current Calculator conditions." in [c.value for c in tab.caption]
+    assert not tab.radio and len(panel_payloads(at)) == 3
     assert any(e.label == "About these ranges" for e in at.expander) and any(e.label == "About night-time VPD" for e in at.expander)
 
 
@@ -819,20 +820,23 @@ def test_preset_sets_both_periods_manual_edit_changes_one_and_new_preset_resets_
     assert limits(at) == ((0.8, 1.2), (0.8, 1.2))
 
 
-def test_changing_bounds_does_not_change_calculator_conditions_and_panels_match():
+def test_changing_bounds_does_not_change_calculator_conditions_and_each_period_has_its_own_bar():
     at = new_app().run()
     before = live_values(at)
     set_num(at, "dn_lo_day", 0.9)
     set_num(at, "dn_hi_day", 0.9)                                             # equal bounds are supported
+    set_num(at, "dn_hi_night", 1.1)
     assert live_values(at) == before
-    cal, rng = [(p["target"], p["inputs"], p["mode"]) for p in panel_payloads(at)]
-    assert cal == rng and cal[0] == {"lo": 0.9, "hi": 0.9, "kind": "leaf", "period": "Day"}
-    assert [p.get("readonly") for p in panel_payloads(at)] == [None, True]
-    at.radio(key="calc_period__r").set_value("Night").run()                  # period is mirrored between the tabs
-    assert at.radio(key="calc_period").value == "Night"
-    assert all(p["target"]["period"] == "Night" for p in panel_payloads(at))
+    cal, day, night = panel_payloads(at)
+    assert [p.get("readonly") for p in (cal, day, night)] == [None, True, True]
+    assert day["target"] == {"lo": 0.9, "hi": 0.9, "kind": "leaf", "period": "Day"}
+    assert night["target"] == {"lo": 0.7, "hi": 1.1, "kind": "leaf", "period": "Night"}
+    assert (day["title"], night["title"]) == ("Day result", "Night result")
+    assert cal["inputs"] == day["inputs"] == night["inputs"] and cal["mode"] == day["mode"] == night["mode"]  # shared conditions
     at.radio(key="mode").set_value(share.MODE_B).run()
     assert all(p["mode"] == "b" for p in panel_payloads(at))
+    set_num(at, "dn_lo_night", 2.0)                                           # invalid range: no band for that period only
+    assert panel_payloads(at)[2]["target"] is None and panel_payloads(at)[1]["target"] is not None
 
 
 def test_range_settings_survive_reruns_and_link_round_trip():

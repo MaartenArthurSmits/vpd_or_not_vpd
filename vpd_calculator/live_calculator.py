@@ -213,7 +213,7 @@ export default function (component) {
   const refresh = () => {
     let html = resultsHtml(d, values);
     if (d.readonly) html = html.replace(/<div class="hint">Edit this target[^<]*<\/div>/, '');
-    panel.innerHTML = '<h3>Results</h3>' + html;
+    panel.innerHTML = `<h3>${d.title || 'Results'}</h3>` + html;
   };
   const commit = () => {
     parentElement.__vpdPending = { sig, values: { ...values } };   // newer than any rerun still in flight
@@ -324,6 +324,6 @@ def copy_link_button(url: str):
     return _copy_component(key="copy_link", data={"url": url})
 
 
-def result_panel(data: dict):
+def result_panel(data: dict, key: str = "range_panel"):
     """Display-only copy of the Calculator's result panel (same JS, same data; no inputs, nothing is sent back)."""
-    return _mount(key="range_panel", data=data)
+    return _mount(key=key, data=data)

@@ -127,7 +127,7 @@ def test_acceptable_range_tab_edits_limits_and_shows_the_calculator_result(page)
     set_number(page, "Night upper limit (kPa)", 1.1)
     page.wait_for_function("() => [...document.querySelectorAll('input[type=number]')].some(i => i.value === '1.10')")
     assert num(page, "Day upper limit (kPa)").input_value() == "1.30"            # the other period is unchanged
-    assert page.locator(".status").locator("visible=true").count() == 1          # the same result bar as the Calculator
+    assert page.locator(".status").locator("visible=true").count() == 2          # one result bar per period
     open_tab(page, "Calculator")                                                  # settings survive tab changes
     open_tab(page, "Acceptable range")
     assert num(page, "Night upper limit (kPa)").input_value() == "1.10"
