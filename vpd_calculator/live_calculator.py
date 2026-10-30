@@ -18,10 +18,19 @@ CSS = """
 @media (max-width: 800px) { .vpd { grid-template-columns: 1fr; } }
 .field { margin-bottom: 1rem; }
 .field label { display: block; font-size: 0.875rem; margin-bottom: 0.25rem; }
-.field input[type=number] { width: 100%; box-sizing: border-box; padding: 0.4rem 0.6rem; font: inherit;
-       color: inherit; background: var(--st-secondary-background-color, #f0f2f6);
-       border: 1px solid transparent; border-radius: 0.5rem; }
-.field input[type=range] { width: 100%; margin: 0.4rem 0 0; accent-color: var(--st-primary-color, #ff4b4b); }
+.numwrap { display: flex; align-items: center; height: 2.5rem; box-sizing: border-box; padding: 0 0.25rem 0 0.75rem;
+          background: var(--st-secondary-background-color, #f0f2f6); border-radius: 0.5rem; }
+.numwrap:focus-within { box-shadow: 0 0 0 1px var(--st-primary-color, #ff4b4b); }
+.numwrap input[type=number] { flex: 1; min-width: 0; height: 100%; padding: 0; font: inherit; font-size: 1rem; color: inherit;
+          background: transparent; border: 0; outline: 0; -moz-appearance: textfield; }
+.numwrap input[type=number]::-webkit-inner-spin-button, .numwrap input[type=number]::-webkit-outer-spin-button
+          { -webkit-appearance: none; margin: 0; }
+.numwrap .step { width: 2rem; height: 2rem; padding: 0; font: inherit; font-size: 1.15rem; line-height: 1; color: inherit;
+          background: transparent; border: 0; border-radius: 0.4rem; cursor: pointer; }
+.numwrap .step:hover { background: rgba(128,128,128,0.2); }
+.field input[type=range] { width: 100%; height: 1.1rem; margin: 0.35rem 0 0; accent-color: var(--st-primary-color, #ff4b4b); }
+.help { display: inline-block; width: 1rem; height: 1rem; margin-left: 0.4rem; border: 1px solid currentColor; border-radius: 50%;
+        font-size: 0.7rem; line-height: 1rem; text-align: center; opacity: 0.65; cursor: help; vertical-align: middle; }
 .panel h3 { margin: 0 0 0.5rem; font-size: 1.5rem; font-weight: 600; }
 .big { font-size: 2.3rem; font-weight: 600; line-height: 1.2; }
 .big .lab { font-size: 1.1rem; font-weight: 400; opacity: 0.8; }
@@ -67,6 +76,8 @@ export function compute(d, v) {
   } else {
     // Reverse mode: the target is always canopy VPD (the representative leaf temperature sets e_s at the leaf).
     out.rh = 100 * (esL - v.target_vpd) / esA;
+    out.airRh = 100 * (1 - v.target_vpd / esA);                 // reference: leaf temperature equals air temperature
+    out.airRhOk = out.airRh >= -RH_TOL && out.airRh <= 100 + RH_TOL;
     out.attainable = out.rh >= -RH_TOL && out.rh <= 100 + RH_TOL;
     if (!out.attainable) {
       const lo = esL - esA, hi = esL;
@@ -147,6 +158,15 @@ function rhBar(d, r, t) {
   });
 }
 
+const AIR_RH_HELP = 'RH for the same VPD target assuming leaf temperature equals air temperature.';
+
+function airRhLine(r) {
+  const val = r.airRhOk ? f1(Math.min(Math.max(r.airRh, 0), 100)) : f1(r.airRh);      // an impossible value is shown raw
+  const note = r.airRhOk ? '' : ' (not physically attainable)';
+  return `<div class="second" data-testid="secondary">Air RH${note}: <b>${val} %</b>` +
+         `<span class="help" role="img" tabindex="0" title="${AIR_RH_HELP}" aria-label="${AIR_RH_HELP}">?</span></div>`;
+}
+
 function reverseHtml(d, r, t) {
   const rhText = (x) => `${f1(x)} %`;
   let h = '';
@@ -157,6 +177,7 @@ function reverseHtml(d, r, t) {
     h += `<div class="err">${r.message}</div>`;
     h += `<div class="big" data-testid="primary"><span class="lab">Canopy RH (not physically attainable)</span> \u2014 ${rhText(r.rh)}</div>`;
   }
+  h += airRhLine(r);
   h += `<div class="cap">Leaf temperature used: ${f1(r.tLeaf)} \u00b0C (offset ${signed1(r.offset)} \u00b0C)</div>`;
   if (r.attainable) for (const w of r.warnings) h += `<div class="warn">${w}</div>`;
   return h;
@@ -206,11 +227,12 @@ export default function (component) {
   const panel = document.createElement('div');
   panel.className = 'panel';
   if (!d.readonly) root.append(left);                          // display-only copy shows just the panel
-  else root.classList.add('ro');
-  root.append(panel);
+  if (d.readonly || d.controlsOnly) root.classList.add('ro');
+  if (!d.controlsOnly) root.append(panel);                     // limit editors show just the controls
   parentElement.appendChild(root);
 
   const refresh = () => {
+    if (d.controlsOnly) return;
     let html = resultsHtml(d, values);
     if (d.readonly) html = html.replace(/<div class="hint">Edit this target[^<]*<\/div>/, '');
     panel.innerHTML = `<h3>${d.title || 'Results'}</h3>` + html;
@@ -229,6 +251,21 @@ export default function (component) {
     num.type = 'number'; num.step = f.step; num.min = f.numMin; num.max = f.numMax;
     num.setAttribute('aria-label', f.label);
     num.dataset.key = f.key;
+    const nudge = (dir) => {                                  // -/+ buttons: one step, no float drift, within limits
+      const x = Math.round((values[f.key] + dir * f.step) / f.step) * f.step;
+      values[f.key] = Math.min(Math.max(Number(x.toFixed(6)), f.numMin), f.numMax);
+      show(); refresh(); commit();
+    };
+    const mk = (text, dir, name) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.textContent = text; b.className = 'step';
+      b.setAttribute('aria-label', `${name} ${f.label}`);
+      b.addEventListener('click', () => nudge(dir));
+      return b;
+    };
+    const wrap = document.createElement('div');
+    wrap.className = 'numwrap';
+    wrap.append(num, mk('\u2212', -1, 'Decrease'), mk('+', 1, 'Increase'));
     const sld = document.createElement('input');
     sld.type = 'range'; sld.min = f.min; sld.max = f.max; sld.step = f.step;
     sld.setAttribute('aria-label', f.label + ' slider');
@@ -249,7 +286,7 @@ export default function (component) {
       if (Number.isFinite(x) && x >= f.numMin && x <= f.numMax) values[f.key] = x;
       show(); refresh(); commit();
     });
-    box.append(label, num, sld);
+    box.append(label, wrap, sld);
     left.appendChild(box);
   }
   refresh();
@@ -327,3 +364,8 @@ def copy_link_button(url: str):
 def result_panel(data: dict, key: str = "range_panel"):
     """Display-only copy of the Calculator's result panel (same JS, same data; no inputs, nothing is sent back)."""
     return _mount(key=key, data=data)
+
+
+def limit_controls(data: dict, on_values, key: str):
+    """Controls-only copy of the component (same number box, -/+ buttons and slider) for the acceptable limits."""
+    return _mount(key=key, data=data, default={"values": None}, on_values_change=on_values)

@@ -77,29 +77,12 @@ if "_share_loaded" not in st.session_state:
     st.session_state["_share_loaded"] = True
 
 
-def linked(label, key, lo, hi, step, fmt="%.1f", num_min=None, num_max=None, help=None, after=None):
-    """Number input + slider bound to one canonical value (`key`)."""
-    num, sld = f"{key}__num", f"{key}__sld"
-    val = float(st.session_state[key])
-    st.session_state[num] = val
-    st.session_state[sld] = min(max(val, lo), hi)
-
-    def from_num():
-        st.session_state[key] = float(st.session_state[num])
-        if after:
-            after()
-
-    def from_sld():
-        st.session_state[key] = float(st.session_state[sld])
-        if after:
-            after()
-
-    st.number_input(label, min_value=lo if num_min is None else num_min,
-                    max_value=hi if num_max is None else num_max,
-                    step=step, format=fmt, key=num, on_change=from_num, help=help)
-    st.slider(label, float(lo), float(hi), step=step, format=fmt, key=sld, on_change=from_sld,
-              label_visibility="collapsed")
-    return float(st.session_state[key])
+# A manual edit that leaves a named preset's limits turns the selector into Custom (no other change).
+_day = (st.session_state["dn_lo_day"], st.session_state["dn_hi_day"])
+_night = (st.session_state["dn_lo_night"], st.session_state["dn_hi_night"])
+_cur = st.session_state["range_preset"]
+if _cur in presets.RANGE_PRESETS and presets.resolve_preset(_cur, _day, _night) != _cur:
+    st.session_state["range_preset"] = presets.CUSTOM
 
 
 FIG4_PATH = Path(__file__).parent / "assets" / "nelson_bugbee_2015_fig4.png"
@@ -311,9 +294,7 @@ with tab_daynight:
             a, b = presets.preset_range(name)
             for p_ in ("day", "night"):
                 st.session_state[f"dn_lo_{p_}"], st.session_state[f"dn_hi_{p_}"] = a, b
-
-    def range_edited():
-        st.session_state["range_preset"] = presets.CUSTOM
+        st.session_state["_range_epoch"] = st.session_state.get("_range_epoch", 0) + 1   # controls drop unsent edits
 
     st.session_state["range_preset__w"] = st.session_state["range_preset"]
     st.selectbox("Range preset", presets.PRESET_NAMES, key="range_preset__w", on_change=apply_range_preset,
@@ -332,11 +313,22 @@ with tab_daynight:
         """Limits on the left, that period's result bar (current Calculator conditions) on the right."""
         p_ = period.lower()
         left, right = st.columns([5, 6], gap="large")
+        lo_key, hi_key = f"dn_lo_{p_}", f"dn_hi_{p_}"
+        bounds = dict(min=0.0, max=4.0, numMin=0.0, numMax=10.0, step=0.05, dec=2)
+
+        def commit_limits(lo_key=lo_key, hi_key=hi_key, ctl=f"range_ctl_{p_}"):
+            for k_ in (lo_key, hi_key):
+                v_ = ((st.session_state.get(ctl) or {}).get("values") or {}).get(k_)
+                if v_ is not None and 0.0 <= float(v_) <= 10.0:
+                    st.session_state[k_] = float(v_)
+
         with left:
-            dlo = linked(f"{period} lower limit (kPa)", f"dn_lo_{p_}", 0.0, 4.0, 0.05, fmt="%.2f", num_max=10.0,
-                         after=range_edited)
-            dhi = linked(f"{period} upper limit (kPa)", f"dn_hi_{p_}", 0.0, 4.0, 0.05, fmt="%.2f", num_max=10.0,
-                         after=range_edited)
+            live_calculator.limit_controls(
+                {"controlsOnly": True, "epoch": st.session_state.get("_range_epoch", 0),
+                 "inputs": [dict(bounds, key=lo_key, label=f"{period} lower limit (kPa)", value=float(st.session_state[lo_key])),
+                            dict(bounds, key=hi_key, label=f"{period} upper limit (kPa)", value=float(st.session_state[hi_key]))]},
+                commit_limits, key=f"range_ctl_{p_}")
+            dlo, dhi = st.session_state[lo_key], st.session_state[hi_key]
             if dlo > dhi:
                 st.error(f"{period}: lower limit must not exceed the upper limit.")
         with right:

@@ -31,7 +31,8 @@ def metric_starting(at, prefix):
     return next(m for m in at.metric if m.label.startswith(prefix))
 
 
-LIVE_KEYS = ("t_air", "rh", "target_vpd", "calc_offset", "calc_leaf_meas")
+LIVE_KEYS = ("t_air", "rh", "target_vpd", "calc_offset", "calc_leaf_meas",
+             "dn_lo_day", "dn_hi_day", "dn_lo_night", "dn_hi_night")
 
 
 def set_num(at, key, value):
@@ -624,6 +625,10 @@ def test_older_cached_heatmap_export_without_svg_is_ignored_without_error():
 
 # ---- acceptable range: presets, shared conditions, reset ----------------------------------------------------
 def panel_payloads(at):
+    return [p for p in controls_and_panels(at) if not p.get("controlsOnly")]
+
+
+def controls_and_panels(at):
     return [json.loads(c.proto.json) for c in at.get("bidi_component") if c.proto.component_name == "vpd_live_calculator"]
 
 
@@ -638,8 +643,9 @@ def test_range_tab_only_edits_ranges_and_has_one_preset_selector():
     assert [w.key for w in tab.selectbox] == ["range_preset__w"] and tab.selectbox[0].label == "Range preset"
     assert tab.selectbox[0].options == [presets.display_label(n) for n in presets.PRESET_NAMES]
     assert tab.selectbox[0].value == presets.DEFAULT_PRESET
-    assert sorted(w.key for w in tab.number_input) == ["dn_hi_day__num", "dn_hi_night__num", "dn_lo_day__num", "dn_lo_night__num"]
-    assert not any(w.key.startswith(("dn_t_", "dn_off_")) for w in tab.number_input)
+    ctl = [p for p in controls_and_panels(at) if p.get("controlsOnly")]
+    assert [[f["key"] for f in p["inputs"]] for p in ctl] == [["dn_lo_day", "dn_hi_day"], ["dn_lo_night", "dn_hi_night"]]
+    assert not tab.number_input and all(f["step"] == 0.05 and f["dec"] == 2 for p in ctl for f in p["inputs"])
     assert not tab.metric and not tab.info
     assert limits(at) == ((0.7, 1.3), (0.7, 1.3))
     assert "Uses the current Calculator conditions." in [c.value for c in tab.caption]
@@ -775,3 +781,10 @@ def test_lopez_and_runkle_propagation_keep_their_identity_despite_identical_boun
     at.selectbox(key="range_preset__w").set_value(runkle).run()
     assert at.session_state["range_preset"] == runkle and qp(at, "rp") == "runkle-low"
     assert app_with_params({"dlo": "0.3", "dhi": "0.7", "nlo": "0.3", "nhi": "0.7", "rp": "runkle-low"}).session_state["range_preset"] == runkle
+
+
+def test_reverse_panel_data_and_shared_control_implementation():
+    at = new_app().run()
+    at.radio(key="mode").set_value(share.MODE_B).run()
+    assert [p["mode"] for p in panel_payloads(at)] == ["b", "b", "b"]            # calculator, Day panel, Night panel
+    assert [p["controlsOnly"] for p in controls_and_panels(at) if p.get("controlsOnly")] == [True, True]
