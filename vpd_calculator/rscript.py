@@ -55,10 +55,11 @@ def _heatmap_block(h: dict) -> list:
     if rc:      # same fixed-kPa colour stops as the app; the colour bar shows actual canopy VPD
         lo_c, hi_c = h["target"]
         zlo, zhi = rangecolor.domain(lo_c, hi_c)
-        cs = rangecolor.colorscale(lo_c, hi_c)
-        scale = ("scale_fill_gradientn(colours = c(" + ", ".join(f'"{c}"' for _, c in cs) + "),\n"
-                 "                       values = c(" + ", ".join(repr(p) for p, _ in cs) + "),\n"
+        scale = ("scale_fill_gradientn(colours = roma_r,      # 256-colour roma table reversed, evenly spaced\n"
                  "                       limits = zlim, oob = scales::squish, labels = function(x) sprintf(\"%.2f\", x))")
+        roma_r_def = ("# Scientific colour map 'roma' (Crameri, https://doi.org/10.5281/zenodo.8035877; MIT licence), "
+                      "reversed (roma_r)\n"
+                      "roma_r <- c(" + ", ".join(f'"{c}"' for c in rangecolor.HEX) + ")")
 
     explain = ("\\n" + rangecolor.EXPLANATION) if rc else ""      # a second caption line in R
     L = [
@@ -88,6 +89,8 @@ def _heatmap_block(h: dict) -> list:
               "grid$vpd_target <- es(t_ref_target) - es(grid$temperature) * grid$rh / 100"]
     point_in_view = h.get("point") is not None and h["t_min"] <= h["point"][0] <= h["t_max"] \
         and h["rh_min"] <= h["point"][1] <= h["rh_max"]
+    if rc:
+        L += ["", roma_r_def]
     L += [
         "",
         "p <- ggplot(grid, aes(x = temperature, y = rh)) +",

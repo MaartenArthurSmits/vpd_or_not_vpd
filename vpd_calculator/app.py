@@ -292,19 +292,30 @@ This calculator uses the same range for day and night by default. Equipment cons
 with tab_daynight:
     st.subheader("Acceptable range")
 
-    def apply_range_preset():
-        """Preset selection: both periods take the preset's limits (Custom keeps the current ones)."""
-        name = st.session_state["range_preset__w"]
+    def apply_preset(name):
+        """Both periods take the preset's limits (Custom keeps the current ones); controls drop unsent edits."""
         st.session_state["range_preset"] = name
         if name in presets.RANGE_PRESETS:
             a, b = presets.preset_range(name)
             for p_ in ("day", "night"):
                 st.session_state[f"dn_lo_{p_}"], st.session_state[f"dn_hi_{p_}"] = a, b
-        st.session_state["_range_epoch"] = st.session_state.get("_range_epoch", 0) + 1   # controls drop unsent edits
+        st.session_state["_range_epoch"] = st.session_state.get("_range_epoch", 0) + 1
+
+    def apply_range_preset():
+        apply_preset(st.session_state["range_preset__w"])
+
+    def reset_ranges():
+        """Default preset and both periods' limits (read from the preset definition); Calculator inputs untouched."""
+        apply_preset(presets.DEFAULT_PRESET)
 
     st.session_state["range_preset__w"] = st.session_state["range_preset"]
-    st.selectbox("Range preset", presets.PRESET_NAMES, key="range_preset__w", on_change=apply_range_preset,
-                 format_func=presets.display_label)
+    pc1, pc2 = st.columns([6, 2], gap="large")
+    with pc1:
+        st.selectbox("Range preset", presets.PRESET_NAMES, key="range_preset__w", on_change=apply_range_preset,
+                     format_func=presets.display_label)
+    with pc2:
+        st.write("")
+        st.button("Reset ranges", key="range_reset", on_click=reset_ranges)
     chosen = st.session_state["range_preset"]
     if chosen in presets.RANGE_PRESETS:
         st.caption(presets.source_citation(chosen))
@@ -431,7 +442,7 @@ with tab_heat:
                            help="Reproduces the calculation and this heatmap with ggplot2 (PNG and PDF export).")
 
         sig = (t_min, t_max, rh_min, rh_max, hm_kind, round(offset, 6), cscale, cstep, zmax_in, pt, tg, ikind,
-               range_mode)
+               range_mode, rangecolor.PALETTE_ID if range_mode else None)
         if d2.button("Prepare figure downloads", key="png_prepare"):
             export = mpl_export.heatmap_mpl(t_min, t_max, rh_min, rh_max, hm_kind, offset, cscale, cstep,
                                             zmax_in or None, pt, tg, target_kind=ikind,
@@ -490,6 +501,7 @@ come from FAO-56 (Allen et al., 1998).
 - ASHRAE. (2023). Environmental control for animals and plants. In *ASHRAE handbook* (SI ed., Chapter 25). https://handbook.ashrae.org/Handbooks/A23/SI/A23_Ch25/a23_ch25_si.aspx
 - Bayer. (2020, February 12). *Fruit length in winter-grown cucumbers*. https://www.vegetables.bayer.com/ca/en-ca/resources/growing-tips/cultivation-insights/fruit-length-in-winter-grown-cucumbers.html
 - Butler, D. R. (1977). Coffee leaf temperatures in a tropical environment. *Acta Botanica Neerlandica, 26*(2), 129–140. https://natuurtijdschriften.nl/pub/540166
+- Crameri, F. (2023). *Scientific colour maps* (Version 8.0.0) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.8035877
 - Garen, J. C., Crous, K. Y., Barton, C. V. M., Rymer, P. D., & Tjoelker, M. G. (2026). Joint dependence of leaf minimum conductance on vapor pressure deficit and temperature. *Plant Physiology, 201*(4), Article kiag575. https://doi.org/10.1093/plphys/kiag575
 - Grossiord, C., Buckley, T. N., Cernusak, L. A., Novick, K. A., Poulter, B., Siegwolf, R. T. W., Sperry, J. S., & McDowell, N. G. (2020). Plant responses to rising vapor pressure deficit. *New Phytologist, 226*(6), 1550–1566. https://doi.org/10.1111/nph.16485
 - Johnston, M. R., Barnes, M. L., Preisler, Y., Smith, W. K., Biederman, J. A., Scott, R. L., Williams, A. P., & Dannenberg, M. P. (2025). Effects of hot versus dry vapor pressure deficit on ecosystem carbon and water fluxes. *Journal of Geophysical Research: Biogeosciences, 130*(1), Article e2024JG008146. https://doi.org/10.1029/2024JG008146

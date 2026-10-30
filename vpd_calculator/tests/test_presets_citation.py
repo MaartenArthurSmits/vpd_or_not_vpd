@@ -124,7 +124,7 @@ def test_bibliography_is_alphabetical_complete_and_free_of_commentary():
     block = app.split("**References** (APA 7)")[1].split("How to cite this software")[0]
     entries = [l[2:] for l in block.split("\n") if l.startswith("- ")]
     keys = [e.split("(")[0].strip(" .,").lower() for e in entries]
-    assert keys == sorted(keys) and len(entries) == 13
+    assert keys == sorted(keys) and len(entries) == 14
     assert "not a source for the equations" not in app and "Wollaeger" not in app
     for e in entries:
         assert "https://" in e and not e.rstrip().endswith(")") or e.rstrip().endswith(("html", "pdf", "aspx", "htm", "540166")) or "doi.org" in e or "articleid" in e or e.rstrip().endswith("Pdf")

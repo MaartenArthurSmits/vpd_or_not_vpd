@@ -51,11 +51,10 @@ def heatmap_figure(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0,
             hovertemplate="Temperature: %{x:.1f} °C<br>RH: %{y:.1f} %<br>" + label + ": %{z:.2f} kPa<extra></extra>",
             name=label,
         ))
-        for name, symbol in ((f"Within range (green)", "square"), ("Below range: VPD under the lower limit", "triangle-down"),
-                             ("Above range: VPD over the upper limit", "triangle-up")):
+        for name, symbol, colour in (("Below range: VPD under the lower limit", "triangle-down", rangecolor.LOW_COLOUR),
+                                     ("Above range: VPD over the upper limit", "triangle-up", rangecolor.HIGH_COLOUR)):
             fig.add_trace(go.Scatter(x=[None], y=[None], mode="markers", name=name, showlegend=True, hoverinfo="skip",
-                                     marker=dict(symbol=symbol, size=11, color=rangecolor.GREEN if symbol == "square" else "#9e9e9e",
-                                                 line=dict(color="black", width=1))))
+                                     marker=dict(symbol=symbol, size=11, color=colour, line=dict(color="black", width=1))))
     else:
         fig.add_trace(go.Heatmap(
             z=z, x=temps, y=rhs, colorscale=colorscale, zmin=zmin, zmax=zmax,

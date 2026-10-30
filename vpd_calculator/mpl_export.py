@@ -17,7 +17,6 @@ import numpy as np  # noqa: E402
 from matplotlib.figure import Figure  # noqa: E402
 from matplotlib.colors import LinearSegmentedColormap, Normalize  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
-from matplotlib.patches import Patch  # noqa: E402
 
 import rangecolor  # noqa: E402
 import vpd  # noqa: E402
@@ -52,7 +51,7 @@ def heatmap_mpl(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0, colorsca
     if rc:
         lo_c, hi_c = target
         cmin, cmax = rangecolor.domain(lo_c, hi_c)
-        cmap = LinearSegmentedColormap.from_list("range", rangecolor.colorscale(lo_c, hi_c), N=4096)
+        cmap = LinearSegmentedColormap.from_list("roma_r", list(rangecolor.LUT), N=256)
         mesh = ax.pcolormesh(temps, rhs, z, cmap=cmap, norm=Normalize(cmin, cmax, clip=True), shading="auto",
                              rasterized=True)
         cbar = fig.colorbar(mesh, ax=ax, pad=0.02)
@@ -87,12 +86,10 @@ def heatmap_mpl(t_min, t_max, rh_min, rh_max, kind=vpd.AIR, offset=0.0, colorsca
         handles.append(Line2D([], [], color="black", linestyle="--", linewidth=2.0,
                               label=vpd.target_label(tkind, lo, hi, dec)))
     if rc:
-        handles += [Patch(facecolor=rangecolor.GREEN, edgecolor="black", label="Within range (green)"),
-                    Line2D([], [], marker="v", color="#9e9e9e", markeredgecolor="black", linestyle="none",
+        handles += [Line2D([], [], marker="v", color=rangecolor.LOW_COLOUR, markeredgecolor="black", linestyle="none",
                            label="Below range: VPD under the lower limit"),
-                    Line2D([], [], marker="^", color="#9e9e9e", markeredgecolor="black", linestyle="none",
+                    Line2D([], [], marker="^", color=rangecolor.HIGH_COLOUR, markeredgecolor="black", linestyle="none",
                            label="Above range: VPD over the upper limit")]
-
     point_in_view = point is not None and t_min <= point[0] <= t_max and rh_min <= point[1] <= rh_max
     if point_in_view:
         t, rh = point

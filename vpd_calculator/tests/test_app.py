@@ -806,3 +806,24 @@ def test_footer_is_shared_below_the_tabs():
     refs = " ".join(m.value for m in at.markdown)
     assert "Butler, D. R. (1977)" in refs and "Nelson, J. A., & Bugbee, B. (2015)" in refs
     assert "(illustrative growth-stage ranges" not in refs
+
+
+def test_reset_ranges_restores_default_preset_and_keeps_calculator_inputs():
+    at = new_app().run()
+    default = presets.preset_range(presets.DEFAULT_PRESET)
+    at.selectbox(key="range_preset__w").set_value(presets.PRESET_NAMES[7]).run()
+    set_num(at, "dn_hi_night", 1.9)
+    set_num(at, "t_air", 29.0)
+    set_num(at, "calc_offset", -2.5)
+    set_num(at, "rh", 41.0)
+    assert limits(at)[1] == (0.8, 1.9) and at.session_state["range_preset"] == presets.CUSTOM
+    epoch = at.session_state.get("_range_epoch", 0)
+    at.button(key="range_reset").click().run()
+    assert not at.exception
+    assert limits(at) == (default, default) and at.session_state["range_preset"] == presets.DEFAULT_PRESET
+    assert at.selectbox(key="range_preset__w").value == presets.DEFAULT_PRESET
+    assert live_values(at) == {"rh": 41.0, "t_air": 29.0, "calc_offset": -2.5}               # Calculator untouched
+    assert at.session_state["_range_epoch"] == epoch + 1
+    assert (qp(at, "dlo"), qp(at, "dhi"), qp(at, "nlo"), qp(at, "nhi"), qp(at, "rp")) == ("0.7", "1.3", "0.7", "1.3", "lopez")
+    at.run()                                                                                  # custom bounds do not return
+    assert limits(at) == (default, default) and qp(at, "nhi") == "1.3" and qp(at, "t") == "29"

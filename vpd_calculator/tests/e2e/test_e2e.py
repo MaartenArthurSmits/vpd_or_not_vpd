@@ -139,7 +139,7 @@ def test_heatmap_controls(page):
     chart = page.locator('[data-testid="stPlotlyChart"]:visible').first
     chart.wait_for(timeout=TIMEOUT)
     page.get_by_text("Canopy VPD (kPa) as a function of temperature").first.wait_for(timeout=TIMEOUT)   # canopy by default
-    assert page.get_by_text("Green shows the acceptable range").count() >= 1
+    assert page.get_by_text("Colours show canopy VPD relative to the acceptable range").count() >= 1
     page.get_by_text("Air VPD", exact=True).locator("visible=true").first.click()
     page.get_by_text("Air VPD (kPa) as a function of temperature").first.wait_for(timeout=TIMEOUT)
     page.get_by_role("combobox", name="Colour scale").click()
