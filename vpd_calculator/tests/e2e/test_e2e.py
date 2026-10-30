@@ -269,3 +269,17 @@ def test_full_page_screenshots(browser, app_url, artifacts_dir, console_log, nam
 def test_zz_no_unexpected_console_errors(console_log):
     """Runs last (name sorts after the others in this module)."""
     assert console_log == [], f"Unexpected browser console errors: {console_log}"
+
+
+def test_secondary_air_row_hidden_when_leaf_and_air_temperatures_are_equal(page):
+    result(page).wait_for(timeout=TIMEOUT)
+    expect(page.get_by_test_id("secondary")).to_have_count(3)        # Calculator + Day + Night panels, default offset -1 degC
+    assert page.locator(".help").count() == 3
+    set_number(page, "Leaf temperature offset (°C, leaf minus air)", 0)
+    expect(page.get_by_test_id("secondary")).to_have_count(0, timeout=TIMEOUT)
+    assert page.locator(".help").count() == 0
+    page.get_by_text("Measured leaf temperature", exact=True).click()
+    set_number(page, "Measured leaf temperature (°C)", 21)
+    expect(page.get_by_test_id("secondary")).to_have_count(3, timeout=TIMEOUT)
+    set_number(page, "Measured leaf temperature (°C)", 22)                                        # equals air; offset value unused
+    expect(page.get_by_test_id("secondary")).to_have_count(0, timeout=TIMEOUT)

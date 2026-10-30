@@ -796,3 +796,13 @@ def test_reverse_panel_data_and_shared_control_implementation():
     at.radio(key="mode").set_value(share.MODE_B).run()
     assert [p["mode"] for p in panel_payloads(at)] == ["b", "b", "b"]            # calculator, Day panel, Night panel
     assert [p["controlsOnly"] for p in controls_and_panels(at) if p.get("controlsOnly")] == [True, True]
+
+
+def test_footer_is_shared_below_the_tabs():
+    at = new_app().run()
+    assert "© 2026 Maarten Arthur Smits · Code: [MIT licence](https://github.com/MaartenArthurSmits/vpd_or_not_vpd/blob/main/LICENSE)" \
+           " · [Cite this calculator](https://github.com/MaartenArthurSmits/vpd_or_not_vpd/blob/main/CITATION.cff)" \
+        in [c.value for c in at.main.caption] or any("Cite this calculator" in c.value for c in at.caption)
+    refs = " ".join(m.value for m in at.markdown)
+    assert "Butler, D. R. (1977)" in refs and "Nelson, J. A., & Bugbee, B. (2015)" in refs
+    assert "(illustrative growth-stage ranges" not in refs

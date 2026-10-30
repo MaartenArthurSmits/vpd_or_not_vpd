@@ -486,17 +486,18 @@ come from FAO-56 (Allen et al., 1998).
     )
     st.markdown(
         """
-- Allen, R. G., Pereira, L. S., Raes, D., & Smith, M. (1998). *Crop evapotranspiration: Guidelines for computing crop water requirements* (FAO Irrigation and Drainage Paper No. 56). Food and Agriculture Organization of the United Nations. https://www.fao.org/4/x0490e/x0490e00.htm (Eq. 11: https://www.fao.org/4/x0490e/x0490e07.htm; Annex 2, Table 2.3: https://www.fao.org/4/x0490e/x0490e0j.htm)
-- ASHRAE. (2023). *ASHRAE handbook: Applications* (SI ed.), Chapter 25, §3.3 Commercial indoor farms. https://handbook.ashrae.org/Handbooks/A23/SI/A23_Ch25/a23_ch25_si.aspx
+- Allen, R. G., Pereira, L. S., Raes, D., & Smith, M. (1998). *Crop evapotranspiration: Guidelines for computing crop water requirements* (FAO Irrigation and Drainage Paper No. 56). Food and Agriculture Organization of the United Nations. https://www.fao.org/4/x0490e/x0490e00.htm
+- ASHRAE. (2023). Environmental control for animals and plants. In *ASHRAE handbook* (SI ed., Chapter 25). https://handbook.ashrae.org/Handbooks/A23/SI/A23_Ch25/a23_ch25_si.aspx
 - Bayer. (2020, February 12). *Fruit length in winter-grown cucumbers*. https://www.vegetables.bayer.com/ca/en-ca/resources/growing-tips/cultivation-insights/fruit-length-in-winter-grown-cucumbers.html
+- Butler, D. R. (1977). Coffee leaf temperatures in a tropical environment. *Acta Botanica Neerlandica, 26*(2), 129–140. https://natuurtijdschriften.nl/pub/540166
 - Garen, J. C., Crous, K. Y., Barton, C. V. M., Rymer, P. D., & Tjoelker, M. G. (2026). Joint dependence of leaf minimum conductance on vapor pressure deficit and temperature. *Plant Physiology, 201*(4), Article kiag575. https://doi.org/10.1093/plphys/kiag575
 - Grossiord, C., Buckley, T. N., Cernusak, L. A., Novick, K. A., Poulter, B., Siegwolf, R. T. W., Sperry, J. S., & McDowell, N. G. (2020). Plant responses to rising vapor pressure deficit. *New Phytologist, 226*(6), 1550–1566. https://doi.org/10.1111/nph.16485
 - Johnston, M. R., Barnes, M. L., Preisler, Y., Smith, W. K., Biederman, J. A., Scott, R. L., Williams, A. P., & Dannenberg, M. P. (2025). Effects of hot versus dry vapor pressure deficit on ecosystem carbon and water fluxes. *Journal of Geophysical Research: Biogeosciences, 130*(1), Article e2024JG008146. https://doi.org/10.1029/2024JG008146
-- Koverda, P. (2020, February 12). *The ultimate vapor pressure deficit (VPD) guide*. Pulse Grow. https://pulsegrow.com/blogs/learn/vpd (illustrative growth-stage ranges, typical leaf-offset note and interface inspiration; not a source for the equations)
+- Koverda, P. (2020, February 12). *The ultimate vapor pressure deficit (VPD) guide*. Pulse Grow. https://pulsegrow.com/blogs/learn/vpd
 - Lopez, R., Chen, P.-J., Cooley, N., & Vander Weide, J. (2026). VPD, temperature & everbearing strawberries. *Inside Grower*. https://www.inside-grower.com/Article/?articleid=28096
-- Runkle, E. S. (2021, December). Water vapor-pressure deficit. *Greenhouse Product News*, 34. https://www.canr.msu.edu/floriculture/uploads/files/Water%20VPD.pdf
-- Runkle, E. S. (2022). *Pros and cons of cool nights*. Michigan State University Extension. https://www.canr.msu.edu/floriculture/uploads/files/Cool%20nights.pdf
-- Wollaeger, H., & Runkle, E. (2015, July 30). Why should greenhouse growers pay attention to vapor-pressure deficit and not relative humidity? *MSU Extension*. https://msu-prod.dotcmscloud.com/news/why_should_greenhouse_growers_pay_attention_to_vapor_pressure_deficit_and_n
+- Nelson, J. A., & Bugbee, B. (2015). Analysis of environmental effects on leaf temperature under sunlight, high pressure sodium and light emitting diodes. *PLOS ONE, 10*(10), Article e0138930. https://doi.org/10.1371/journal.pone.0138930
+- Runkle, E. (2021, December). Water vapor-pressure deficit. *Greenhouse Product News*, 34. https://www.canr.msu.edu/floriculture/uploads/files/Water%20VPD.pdf
+- Runkle, E. (2022). *Pros and cons of cool nights*. https://www.canr.msu.edu/floriculture/uploads/files/Cool%20nights.pdf
 - Yamanaka, R., Yano, T., Hikawa-Endo, M., Yoshikoshi, H., Kawashima, H., Tojo, M., & Wada, T. (2025). Relationship between vapor pressure deficit condition and water-stress status in strawberry. *The Horticulture Journal, 94*(1), 73–80. https://doi.org/10.2503/hortj.SZD-015
 """
     )
@@ -629,3 +630,6 @@ None of these are experimental measurements.
                                        {"Application - Johnston (kPa)": st.column_config.NumberColumn(format="%.5f")})
             st.caption("No tabulated benchmark exists for arbitrary inputs, so this example is compared "
                        "with the alternative equation only.")
+
+st.divider()
+st.caption(citation.footer_markdown())

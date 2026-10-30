@@ -70,7 +70,7 @@ export function compute(d, v) {
   const tAir = v.t_air;
   const tLeaf = d.leafMethod === 'measured' ? v.calc_leaf_meas : tAir + v.calc_offset;
   const esA = es(tAir), esL = es(tLeaf);
-  const out = { tLeaf, offset: tLeaf - tAir, esA, esL, warnings: [], attainable: true };
+  const out = { tLeaf, tAirIn: tAir, offset: tLeaf - tAir, esA, esL, warnings: [], attainable: true };
   if (d.mode === 'a') {
     out.rh = v.rh;
   } else {
@@ -159,12 +159,15 @@ function rhBar(d, r, t) {
 }
 
 const AIR_RH_HELP = 'RH for the same VPD target assuming leaf temperature equals air temperature.';
+const AIR_VPD_HELP = 'VPD calculated from air temperature and relative humidity, without a leaf-temperature correction.';
+const SAME_TEMP_TOL = 1e-9;       // the secondary Air row is redundant only when leaf and air temperature are equal
+const helpMark = (text) => `<span class="help" role="img" tabindex="0" title="${text}" aria-label="${text}">?</span>`;
+const sameTemperature = (r) => Math.abs(r.tLeaf - r.tAirIn) <= SAME_TEMP_TOL;       // effective leaf minus air
 
 function airRhLine(r) {
   const val = r.airRhOk ? f1(Math.min(Math.max(r.airRh, 0), 100)) : f1(r.airRh);      // an impossible value is shown raw
   const note = r.airRhOk ? '' : ' (not physically attainable)';
-  return `<div class="second" data-testid="secondary">Air RH${note}: <b>${val} %</b>` +
-         `<span class="help" role="img" tabindex="0" title="${AIR_RH_HELP}" aria-label="${AIR_RH_HELP}">?</span></div>`;
+  return `<div class="second" data-testid="secondary">Air RH${note}: <b>${val} %</b>${helpMark(AIR_RH_HELP)}</div>`;
 }
 
 function reverseHtml(d, r, t) {
@@ -177,7 +180,7 @@ function reverseHtml(d, r, t) {
     h += `<div class="err">${r.message}</div>`;
     h += `<div class="big" data-testid="primary"><span class="lab">Canopy RH (not physically attainable)</span> \u2014 ${rhText(r.rh)}</div>`;
   }
-  h += airRhLine(r);
+  if (!sameTemperature(r)) h += airRhLine(r);
   h += `<div class="cap">Leaf temperature used: ${f1(r.tLeaf)} \u00b0C (offset ${signed1(r.offset)} \u00b0C)</div>`;
   if (r.attainable) for (const w of r.warnings) h += `<div class="warn">${w}</div>`;
   return h;
@@ -193,7 +196,7 @@ export function resultsHtml(d, v) {
   } else {
     h += `<div class="hint">The acceptable range is invalid (lower limit above upper limit). Fix it in the Acceptable range tab.</div>`;
   }
-  h += `<div class="second" data-testid="secondary">Air VPD: <b>${k2(r.air)}</b></div>`;
+  if (!sameTemperature(r)) h += `<div class="second" data-testid="secondary">Air VPD: <b>${k2(r.air)}</b>${helpMark(AIR_VPD_HELP)}</div>`;
   h += `<div class="cap">Leaf temperature used: ${f1(r.tLeaf)} \u00b0C (offset ${signed1(r.offset)} \u00b0C)</div>`;
   for (const w of r.warnings) h += `<div class="warn">${w}</div>`;
   return h;

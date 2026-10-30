@@ -44,7 +44,8 @@ def test_adaptation_statement_is_explicit_and_sources_are_in_the_references():
     assert "assumes air and canopy VPD are identical" in presets.ABOUT_RANGES
     assert "remains fixed regardless of leaf temperature inputs" in presets.ABOUT_RANGES and presets.ABOUT_RANGES.count("\n\n") == 1
     app = (ROOT / "app.py").read_text(encoding="utf-8")
-    for needle in ("Yamanaka, R.", "Lopez, R.", "Runkle, E. S. (2021", "Runkle, E. S. (2022", "Wollaeger, H.", "ASHRAE. (2023)", "Bayer. (2020"):
+    for needle in ("Yamanaka, R.", "Lopez, R.", "Runkle, E. (2021", "Runkle, E. (2022", "ASHRAE. (2023)", "Bayer. (2020",
+                   "Butler, D. R. (1977)", "Nelson, J. A., & Bugbee, B. (2015)"):
         assert needle in app, needle
     for needle in ("above 0.3 kPa when managing cooler nights", "approximately 0.41 kPa/hour",
                    "same range for day and night by default"):
@@ -109,3 +110,21 @@ def test_pulse_grow_attribution_is_not_claimed_for_equations():
     assert "Koverda, P. (2020, February 12)" in app
     text = (REPO / "README.md").read_text(encoding="utf-8")
     assert "Pulse Grow" in text and "not" in text.split("Pulse Grow", 1)[1][:400].lower()
+
+
+def test_footer_text_and_links_come_from_the_citation_metadata():
+    footer = citation.footer_markdown()
+    assert footer.startswith("© 2026 Maarten Arthur Smits · Code: [MIT licence](")
+    assert f"({citation.REPO_URL}/blob/main/LICENSE)" in footer and f"[Cite this calculator]({citation.REPO_URL}/blob/main/CITATION.cff)" in footer
+    assert (REPO / "LICENSE").exists() and (REPO / "CITATION.cff").exists()
+
+
+def test_bibliography_is_alphabetical_complete_and_free_of_commentary():
+    app = (ROOT / "app.py").read_text(encoding="utf-8")
+    block = app.split("**References** (APA 7)")[1].split("How to cite this software")[0]
+    entries = [l[2:] for l in block.split("\n") if l.startswith("- ")]
+    keys = [e.split("(")[0].strip(" .,").lower() for e in entries]
+    assert keys == sorted(keys) and len(entries) == 13
+    assert "not a source for the equations" not in app and "Wollaeger" not in app
+    for e in entries:
+        assert "https://" in e and not e.rstrip().endswith(")") or e.rstrip().endswith(("html", "pdf", "aspx", "htm", "540166")) or "doi.org" in e or "articleid" in e or e.rstrip().endswith("Pdf")

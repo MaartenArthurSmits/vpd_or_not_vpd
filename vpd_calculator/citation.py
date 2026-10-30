@@ -33,3 +33,9 @@ def bibtex() -> str:
 def ieee() -> str:
     return (f"M. A. {AUTHOR_FAMILY}, \"{TITLE},\" version {VERSION}, {YEAR}. [Computer software]. "
             f"Available: {REPO_URL}")
+
+
+def footer_markdown() -> str:
+    """Shared footer: copyright, code licence and citation file (the licence applies to the code only)."""
+    return (f"© {YEAR} {AUTHOR_GIVEN} {AUTHOR_FAMILY} · Code: [MIT licence]({REPO_URL}/blob/main/LICENSE) · "
+            f"[Cite this calculator]({REPO_URL}/blob/main/CITATION.cff)")
