@@ -107,7 +107,7 @@ def test_switching_modes_reverse_calculation_and_state_preserved(page):
 def test_unattainable_target_message(page):
     page.get_by_text(share.MODE_B, exact=True).click()
     set_number(page, "Target VPD (kPa)", 5)
-    page.get_by_text("Unattainable").first.wait_for(timeout=TIMEOUT)
+    page.get_by_text("Unattainable:").locator("visible=true").first.wait_for(timeout=TIMEOUT)
 
 
 def test_day_night_target_choice_keeps_calculator_inputs(page):
