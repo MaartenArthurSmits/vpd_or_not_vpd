@@ -347,3 +347,34 @@ def test_separated_treatment_and_star_keep_their_standard_presentation():
     star = fig.data[-1]
     assert star.marker.size == 18 and list(trace.marker.size) == [14, 14] and set(trace.textposition) == {"top center"}
     assert "Comparison treatment" not in star.hovertemplate
+
+
+# ---- treatment markers in the Matplotlib export --------------------------------------------------------
+def test_mpl_export_draws_treatments_at_exact_coordinates_with_the_star_above():
+    shared = dict(MARKERS[0], name="Cool")
+    fig = mpl_export.heatmap_mpl(10, 40, 20, 100, vpd.LEAF, -2.0, point=(22, 60), treatments=[shared, MARKERS[1]])
+    ax = fig.axes[0]
+    from matplotlib.collections import PathCollection
+    (diamonds,) = [c for c in ax.collections if type(c) is PathCollection]                # the scatter layer
+    assert diamonds.get_offsets().tolist() == [[22.0, 60.0], [33.0, 60.0]]               # coordinates are exact
+    sizes = diamonds.get_sizes()
+    star = [line for line in ax.lines if line.get_marker() == "*"][0]
+    assert sizes[0] > sizes[1] and star.get_zorder() > diamonds.get_zorder()              # star above, coincident diamond larger
+    assert star.get_xdata()[0] == 22 and star.get_ydata()[0] == 60
+    labels = {a.get_text(): a.xy for a in ax.texts if a.get_text() in ("Cool", "Warm")}
+    assert labels == {"Cool": (22.0, 60.0), "Warm": (33.0, 60.0)}
+    assert "Comparison treatments" in [t.get_text() for t in ax.get_legend().get_texts()]
+    note = fig.get_supxlabel()
+    assert "Treatment markers use each treatment's own leaf offset" in note and "(-2.0 °C)" in note
+    for fmt in ("png", "pdf", "svg"):
+        assert mpl_export.to_bytes(fig, fmt, 80)[:4] in (b"\x89PNG", b"%PDF", b"<?xm")
+    assert b"Warm" in mpl_export.to_bytes(fig, "svg")
+
+
+def test_mpl_export_without_treatments_or_with_equal_offsets_has_no_marker_layer_or_note():
+    plain = mpl_export.heatmap_mpl(10, 40, 20, 100, vpd.LEAF, -2.0, point=(22, 60))
+    assert all("Comparison" not in t.get_text() for t in plain.axes[0].get_legend().get_texts())
+    equal = mpl_export.heatmap_mpl(10, 40, 20, 100, vpd.LEAF, -2.0, point=(22, 60), treatments=[MARKERS[0]])
+    assert "Treatment markers use" not in equal.get_supxlabel()
+    air = mpl_export.heatmap_mpl(10, 40, 20, 100, vpd.AIR, 0.0, treatments=MARKERS)           # leaf VPD not involved
+    assert "Treatment markers use" not in air.get_supxlabel()

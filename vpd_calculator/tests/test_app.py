@@ -1204,7 +1204,7 @@ def heatmap_captions(at):
 def test_treatment_markers_toggle_hover_explanation_and_edits(monkeypatch):
     at = new_app().run()
     assert at.checkbox(key="hm_treatments").value is False and treatment_trace(at) == []
-    assert "not yet included in the figure downloads" in heatmap_captions(at)
+    assert "PNG/PDF/SVG downloads and the R script" in heatmap_captions(at)
     at.session_state["cmp_editor"] = {
         "edited_rows": {0: {treat.OFFSET: -2.0}, 1: {treat.OFFSET: 1.0}},
         "added_rows": [{treat.NAME: "Far", treat.T_AIR: 50.0, treat.RH: 60.0, treat.OFFSET: 0.0},
@@ -1332,3 +1332,32 @@ def test_sharing_explanation_separates_json_coverage_from_links():
     at = new_app().run()
     text = " ".join(c.value for c in at.caption)
     assert "not in links" in text and "Compare treatments input rows" in text and "version-2" in text
+
+
+def test_prepared_figure_downloads_follow_the_comparison_treatments_and_toggle(monkeypatch):
+    calls = capture_heatmap_downloads(monkeypatch)
+    at = new_app().run()
+    at.session_state["cmp_editor"] = {"edited_rows": {0: {treat.OFFSET: -2.0}}, "added_rows": [], "deleted_rows": []}
+    at.checkbox(key="hm_treatments").set_value(True).run()
+    at.button(key="png_prepare").click().run()
+    assert heatmap_downloads(at) == {"Download PNG", "Download PDF", "Download SVG"}
+    svg = calls["Download SVG"]["data"].decode("utf-8")
+    assert "Example A (22 °C, 60 % RH)" in svg and "Example B (33 °C, 60 % RH)" in svg      # markers are in the export
+    at.run()                                                                                  # unchanged: still offered
+    assert heatmap_downloads(at)
+    at.session_state["cmp_editor"] = {"edited_rows": {0: {treat.OFFSET: -2.0, treat.NAME: "Renamed"}}, "added_rows": [],
+                                      "deleted_rows": []}
+    at.run()
+    assert heatmap_downloads(at) == set()                                                     # renamed -> stale
+    at.button(key="png_prepare").click().run()
+    assert "Renamed" in calls["Download SVG"]["data"].decode("utf-8") and heatmap_downloads(at)
+    at.session_state["cmp_editor"] = {"edited_rows": {0: {treat.OFFSET: -2.0, treat.NAME: "Renamed"}}, "added_rows": [],
+                                      "deleted_rows": [1]}
+    at.run()
+    assert heatmap_downloads(at) == set()                                                     # deleted -> stale
+    at.button(key="png_prepare").click().run()
+    assert heatmap_downloads(at)
+    at.checkbox(key="hm_treatments").set_value(False).run()
+    assert heatmap_downloads(at) == set()                                                     # hidden -> stale
+    at.button(key="png_prepare").click().run()
+    assert "Renamed" not in calls["Download SVG"]["data"].decode("utf-8")                    # no markers when hidden

@@ -516,8 +516,8 @@ with tab_heat:
     show_point = o2.checkbox("Mark selected temperature/RH", value=True, key="hm_point")
     show_treatments = st.checkbox("Show comparison treatments", value=False, key="hm_treatments",
                                   help="Markers for the valid rows of the Compare treatments tab.")
-    st.caption("Comparison markers appear in this interactive chart only; they are not yet included in the "
-               "figure downloads.")
+    st.caption("Comparison markers are drawn in the interactive chart, the PNG/PDF/SVG downloads and the R script "
+               "(valid treatments inside the axes only).")
     hm_kind = kind_from_label(hm_kind_label)
 
     if t_min >= t_max or rh_min >= rh_max:
@@ -565,7 +565,7 @@ with tab_heat:
 
         hm_params = dict(t_min=t_min, t_max=t_max, rh_min=rh_min, rh_max=rh_max, kind=hm_kind,
                          offset=offset, colorscale=cscale, contour_step=cstep, z_max=zmax_in or None,
-                         point=pt, target=tg, target_kind=ikind)
+                         point=pt, target=tg, target_kind=ikind, treatments=markers or None)
         leaf_t = measured if measured is not None else t_air + offset
         r_code = rscript.build_r_script(
             mode_a, t_air, st.session_state["rh"], st.session_state["target_vpd"],
@@ -575,10 +575,13 @@ with tab_heat:
                            "vpd_heatmap.R", "text/plain", key="dl_rscript",
                            help="Reproduces the calculation and this heatmap with ggplot2 (PNG and PDF export).")
 
-        sig = (t_min, t_max, rh_min, rh_max, hm_kind, round(offset, 6), cscale, cstep, zmax_in, pt, tg, ikind)
+        marker_sig = tuple((m["name"], m["t_air"], m["rh"], m["offset"]) for m in markers)
+        sig = (t_min, t_max, rh_min, rh_max, hm_kind, round(offset, 6), cscale, cstep, zmax_in, pt, tg, ikind,
+               show_treatments, marker_sig)
         if d2.button("Prepare figure downloads", key="png_prepare"):
             export = mpl_export.heatmap_mpl(t_min, t_max, rh_min, rh_max, hm_kind, offset, cscale, cstep,
-                                            zmax_in or None, pt, tg, target_kind=ikind)
+                                            zmax_in or None, pt, tg, target_kind=ikind,
+                                            treatments=markers or None)
             st.session_state["png"] = (sig, mpl_export.to_bytes(export, "png", 300),
                                        mpl_export.to_bytes(export, "pdf"), mpl_export.to_bytes(export, "svg"))
         cached = st.session_state.get("png")
